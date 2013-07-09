@@ -1,0 +1,22 @@
+[server]
+server = 192.168.1.111
+port = 8051
+sleep_time = 60
+check_minutes = 5
+api_key = wptapikey
+firefoxpath = /var/www/webpagetest/installers/browsers/firefox-installer.exe
+firefoxdatpath = /var/www/webpagetest/installers/browsers/firefox.dat
+
+[mail]
+username = mailer@example.com
+password = password
+mailhost = mail.example.com
+
+[admin]
+admin_toaddrs = wpt@example.com
+admin_subject = wpt monitor jobs
+admin_loglevel = DEBUG
+
+[defaults]
+locations = bc-winxp01-wptdriver:Firefox,bc-winxp01-wptdriver:Chrome,bc-win61i32-bld-wptdriver:Firefox,bc-win61i32-bld-wptdriver:Chrome,bc-win61i32-bld-wptdriver:IE
+urls = http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/

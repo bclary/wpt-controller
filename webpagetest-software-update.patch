@@ -1,0 +1,37 @@
+Index: agent/wptdriver/software_update.cc
+===================================================================
+--- agent/wptdriver/software_update.cc	(revision 1937)
++++ agent/wptdriver/software_update.cc	(working copy)
+@@ -41,6 +41,11 @@
+         buff, _countof(buff), settings_ini)) {
+     _software_url = buff;
+   }
++
++  _software_update_interval_minutes = GetPrivateProfileInt(_T("WebPagetest"),
++                                                           _T("software_update_interval_minutes"),
++                                                           SOFTWARE_UPDATE_INTERVAL_MINUTES,
++                                                           iniFile);
+   if (GetPrivateProfileSectionNames(sections, _countof(sections), 
+       settings_ini)) {
+     TCHAR * section = sections;
+@@ -298,7 +303,7 @@
+   } else {
+     DWORD elapsed = (DWORD)((now.QuadPart - _last_update_check.QuadPart) 
+                       / _perf_frequency_minutes.QuadPart);
+-    if (elapsed >= SOFTWARE_UPDATE_INTERVAL_MINUTES) {
++    if (elapsed >= _software_update_interval_minutes) {
+       should_check = true;
+     }
+   }
+Index: agent/wptdriver/software_update.h
+===================================================================
+--- agent/wptdriver/software_update.h	(revision 1937)
++++ agent/wptdriver/software_update.h	(working copy)
+@@ -29,6 +29,7 @@
+   CString           _directory;
+   LARGE_INTEGER     _last_update_check;
+   LARGE_INTEGER     _perf_frequency_minutes;
++  int               _software_update_interval_minutes;
+ 
+   bool UpdateBrowsers(void);
+   bool InstallSoftware(CString browser, CString file_url, CString md5,
