@@ -149,8 +149,6 @@ def postToWPTQueue(options):
     host = '%s:%s' % (options.host, options.port)
     options =  {'urls': options.urls, 'speeds': options.linkSpeed, 'email': options.username, 'build': options.build}
     controller = 'http://%s/wpt-controller/accept-jobs.wsgi' % host
-    print "controller: %s" % controller
-    print "options: %s" % options
     r = requests.post(controller, data=json.dumps(options))
     print r
     return
