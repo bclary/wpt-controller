@@ -44,10 +44,10 @@ def application(environ, start_response):
         request_body = environ['wsgi.input'].read(request_body_size)
         try:
             d = json.loads(request_body)
-            email = d.get('email', [''])
-            build = d.get('build', [''])
-            label = d.get('label', [''])
-            runs = d.get('runs', [''])
+            email = d.get('email', [''])[0]
+            build = d.get('build', [''])[0]
+            label = d.get('label', [''])[0]
+            runs = d.get('runs', [''])[0]
         except:
             d = parse_qs(request_body)
             email = d.get('email', [''])[0]
