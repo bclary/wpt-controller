@@ -21,6 +21,16 @@ class WptOptions(optparse.OptionParser):
                         help="revision of the try server build that you wish to run")
         defaults["revision"]=None
 
+        self.add_option("--host",
+                        action="store", dest="host",
+                        help="hostname of the wpt-controller (default: localhost)")
+        defaults["host"] = 'localhost'
+
+        self.add_option("--port",
+                        action="store", dest="port",
+                        help="port that the wpt-controller is running on (default: 80)")
+        defaults["port"] = '80'
+
         self.add_option("--username",
                         action="store", dest="username",
                         help="username used to push to try")
@@ -61,7 +71,7 @@ class WptOptions(optparse.OptionParser):
                 sys.exit(1)
 
             # verify build exists
-            server = 'http://people.moizlla.org'
+            server = 'http://people.mozilla.org'
             path = options.build.split(server)[-1]
             conn = httplib.HTTPConnection(server)
             conn.request('HEAD', path)
@@ -136,9 +146,12 @@ def getHgLog(options):
     return options
 
 def postToWPTQueue(options):
-    host = 'localhost:8051'
+    host = '%s:%s' % (options.host, options.port)
     options =  {'urls': options.urls, 'speeds': options.linkSpeed, 'email': options.username, 'build': options.build}
-    r = requests.post("http://%s/accept_jobs.wsgi" % host, data=json.dumps(options))
+    controller = 'http://%s/wpt-controller/accept-jobs.wsgi' % host
+    print "controller: %s" % controller
+    print "options: %s" % options
+    r = requests.post(controller, data=json.dumps(options))
     print r
     return
 
