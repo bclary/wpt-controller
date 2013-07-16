@@ -20,6 +20,8 @@ from cgi import parse_qs, escape
 from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
 
+from monitor_jobs import JobMonitor
+
 def application(environ, start_response):
     email = ''
     build = ''
@@ -69,67 +71,68 @@ def application(environ, start_response):
         urls = [escape(url.strip()) for url in urls]
 
         try:
-            cursor.execute(
+            jm.cursor.execute(
                 'insert into jobs(email, build, label, runs, status, started) '
                 'values (?, ?, ?, ?, ?, ?)',
                 (email, build, label, runs, 'waiting',
                  datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')))
-            connection.commit()
-            jobid = cursor.lastrowid
+            jm.connection.commit()
+            jobid = jm.cursor.lastrowid
         except sqlite3.OperationalError:
             msg = 'SQLError inserting job: email: %s, build: %s, label: %s, runs: %s' % (email, build, label, runs)
-            emaillogger.exception(msg)
-            notify_user(email, 'Your webpagetest job failed').exception(msg)
+            jm.emaillogger.exception(msg)
+            jm.notify_user(email, 'Your webpagetest job failed').exception(msg)
             raise
 
         for location in locations:
             try:
-                cursor.execute(
+                jm.cursor.execute(
                     'insert into locations(location, jobid) '
                     'values (?, ?)',
                     (location, jobid))
-                connection.commit()
+                jm.connection.commit()
             except sqlite3.OperationalError:
                 msg = 'SQLError inserting location: email: %s, build: %s, label: %s, location: %s' % (email, build, label, location)
-                emaillogger.exception(msg)
-                notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.emaillogger.exception(msg)
+                jm.notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.purge_job(jobid)
                 raise
 
         for speed in speeds:
             try:
-                cursor.execute(
+                jm.cursor.execute(
                     'insert into speeds(speed, jobid) values (?, ?)',
                     (speed, jobid))
-                connection.commit()
+                jm.connection.commit()
             except sqlite3.OperationalError:
                 msg = 'SQLError inserting speed: email: %s, build: %s, label: %s, location: %s' % (email, build, label, speed)
-                emaillogger.exception(msg)
-                notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.emaillogger.exception(msg)
+                jm.notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.purge_job(jobid)
                 raise
 
         for url in urls:
             try:
-                cursor.execute(
+                jm.cursor.execute(
                     'insert into urls(url, jobid) values (?, ?)',
                     (url, jobid))
-                connection.commit()
+                jm.connection.commit()
             except sqlite3.OperationalError:
                 msg = 'SQLError inserting url: email: %s, build: %s, label: %s, url: %s' % (email, build, label, url)
-                emaillogger.exception(msg)
-                notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.emaillogger.exception(msg)
+                jm.notify_user(email, 'Your webpagetest job failed').exception(msg)
+                jm.purge_job(jobid)
                 raise
-
     else:
-        # error?
-        pass
+        pass  # error?
 
     currentteststable = ''
 
     try:
-        cursor.execute('select * from jobs')
-        jobrows = cursor.fetchall()
+        jm.cursor.execute('select * from jobs')
+        jobrows = jm.cursor.fetchall()
     except sqlite3.OperationalError:
-        emaillogger.exception('SQLError selecting jobs.')
+        jm.emaillogger.exception('SQLError selecting jobs.')
         raise
 
     if jobrows:
@@ -138,30 +141,30 @@ def application(environ, start_response):
     for jobrow in jobrows:
         jobid = jobrow[0]
         try:
-            cursor.execute(
+            jm.cursor.execute(
                 'select * from locations where jobid=:jobid',
                 {'jobid': jobid})
-            locationrows = cursor.fetchall()
+            locationrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            emaillogger.exception('SQLError selecting locations for job %s.' % jobid)
+            jm.emaillogger.exception('SQLError selecting locations for job %s.' % jobid)
             raise
 
         try:
-            cursor.execute(
+            jm.cursor.execute(
                 'select * from speeds where jobid=:jobid',
                 {'jobid': jobid})
-            speedrows = cursor.fetchall()
+            speedrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            emaillogger.exception('SQLError selecting speeds for job %s.' % jobid)
+            jm.emaillogger.exception('SQLError selecting speeds for job %s.' % jobid)
             raise
 
         try:
-            cursor.execute(
+            jm.cursor.execute(
                 'select * from urls where jobid=:jobid',
                 {'jobid': jobid})
-            urlrows = cursor.fetchall()
+            urlrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            emaillogger.exception('SQLError selecting urls for job %s.' % jobid)
+            jm.emaillogger.exception('SQLError selecting urls for job %s.' % jobid)
             raise
 
         currentteststable += (
@@ -204,14 +207,6 @@ def application(environ, start_response):
     return [str(response_body)]
 
 
-def notify_user(user, subject):
-    """Set the useremail handler's to address and subject fields
-    and return a reference to the userlogger object."""
-    userhandler.toaddrs = [user]
-    userhandler.subject = subject
-    return userlogger
-
-
 if __name__ == '__main__':
 
     from optparse import OptionParser
@@ -232,123 +227,7 @@ if __name__ == '__main__':
 
     (options, args) = parser.parse_args()
 
-    config = ConfigParser.RawConfigParser()
-    config.readfp(open(options.settings))
-    server = config.get('server', 'server')
-    try:
-        port = config.getint('server', 'port')
-    except ConfigParser.Error:
-        port = 8051
-
-    default_locations = config.get('defaults', 'locations').split(',')
-    default_urls = config.get('defaults', 'urls').split(',')
-
-    mail_username = config.get('mail', 'username')
-    mail_password = config.get('mail', 'password')
-    mail_host = config.get('mail', 'mailhost')
-
-    admin_toaddrs = config.get('admin', 'admin_toaddrs').split(',')
-    admin_subject = config.get('admin', 'admin_subject')
-
-    admin_loglevel = logging.DEBUG
-    try:
-        admin_loglevel = getattr(logging,
-                                 config.get('admin',
-                                            'admin_loglevel'))
-    except AttributeError:
-        pass
-    except ConfigParser.Error:
-        pass
-
-    logger = logging.getLogger()
-    logger.setLevel(admin_loglevel)
-    filehandler = TimedRotatingFileHandler(options.log,
-                                           when='D',
-                                           interval=1,
-                                           backupCount=7,
-                                           encoding=None,
-                                           delay=False,
-                                           utc=False)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    filehandler.setFormatter(formatter)
-    logger.addHandler(filehandler)
-
-    # Set up the administrative logger with an SMPT handler. It
-    # should also bubble up to the root logger so we only need to
-    # use it for ERROR or CRITICAL messages.
-
-    emaillogger = logging.getLogger('email')
-    emaillogger.setLevel(logging.ERROR)
-    emailhandler = SMTPHandler(mail_host,
-                               mail_username,
-                               admin_toaddrs,
-                               admin_subject,
-                               credentials=(mail_username,
-                                            mail_password),
-                               secure=())
-    emaillogger.addHandler(emailhandler)
-
-    userlogger = logging.getLogger('user')
-    userlogger.propagate = False
-    userlogger.setLevel(logging.INFO)
-    userhandler = SMTPHandler(mail_host,
-                              mail_username,
-                              admin_toaddrs,
-                              'user subject',
-                              credentials=(mail_username,
-                                           mail_password),
-                              secure=())
-    userlogger.addHandler(userhandler)
-
-    if os.path.exists(options.database):
-        try:
-            connection = sqlite3.connect(options.database)
-            connection.execute('PRAGMA foreign_keys = ON;')
-            cursor = connection.cursor()
-        except sqlite3.OperationalError:
-            emaillogger.exception('SQLError creating connection to database %s' % options.database)
-            raise
-    else:
-        try:
-            connection = sqlite3.connect(options.database)
-            connection.execute('PRAGMA foreign_keys = ON;')
-            cursor = connection.cursor()
-            cursor.execute('create table jobs ('
-                           'id integer primary key autoincrement, '
-                           'email text, '
-                           'build text, '
-                           'label text, '
-                           'runs text, '
-                           'status text, '
-                           'started text, '
-                           'timestamp text'
-                           ')'
-            )
-            connection.commit()
-            cursor.execute('create table locations ('
-                           'id integer primary key autoincrement, '
-                           'location text, '
-                           'jobid references jobs(id)'
-                           ')'
-            )
-            connection.commit()
-            cursor.execute('create table speeds ('
-                           'id integer primary key autoincrement, '
-                           'speed text, '
-                           'jobid references jobs(id)'
-                           ')'
-            )
-            connection.commit()
-            cursor.execute('create table urls ('
-                           'id integer primary key autoincrement, '
-                           'url text, '
-                           'jobid references jobs(id)'
-                           ')'
-            )
-            connection.commit()
-        except sqlite3.OperationalError:
-            emaillogger.exception('SQLError creating schema in database %s' % options.database)
-            raise
+    jm = JobMonitor(options, createdb=True)
 
     html = """
     <html>
@@ -384,14 +263,14 @@ if __name__ == '__main__':
           <p>
              <label>URLS:
              <select name="urls" multiple>"""
-    html += ''.join(['<option>' + url + '</option>' for url in default_urls])
+    html += ''.join(['<option>' + url + '</option>' for url in jm.default_urls])
     html += """</select>
              <label>
           </p>
           <p>
             <label>Locations:
             <select name="locations" multiple>"""
-    html += ''.join(['<option>' + location + '</option>' for location in default_locations])
+    html += ''.join(['<option>' + location + '</option>' for location in jm.default_locations])
     html += """</select>
             </label>
           <p>
@@ -413,6 +292,6 @@ if __name__ == '__main__':
     </html>
     """
 
-    httpd = make_server(server, port, application)
+    httpd = make_server('localhost', jm.port, application)
     httpd.serve_forever()
 
