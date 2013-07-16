@@ -8,18 +8,46 @@ import subprocess
 import httplib
 import json
 import requests
-
-LINK_SPEEDS = ['Cable', 'DSL', 'DSL', 'Dial', 'Fios', 'Native']
+import ConfigParser
 
 class WptOptions(optparse.OptionParser):
+    def getConfig(self):
+        if self.config:
+            return True
+
+        self.filename = ''
+        if os.path.exists('settings.ini'):
+            self.filename = 'settings.ini'
+        elif os.path.exists('settings.ini.example'):
+            self.filename = 'settings.ini.example'
+
+        if not self.filename:
+            return False
+
+        try:
+            self.config = ConfigParser.RawConfigParser()
+            self.config.readfp(open(self.filename))
+        except:
+            self.config = None
+            return False
+        return True
+
     def __init__(self, **kwargs):
         optparse.OptionParser.__init__(self, **kwargs)
         defaults = {}
+        self.config = None
+        self.LINK_SPEEDS = ['Cable', 'DSL', 'Dial', 'Fios', 'Native']
+        self.DEFAULT_LOCATIONS = []
+        self.DEFAULT_URLS = []
+
+        if self.getConfig():
+            DEFAULT_LOCATIONS = self.config.get('defaults', 'locations').split(',')
+            DEFAULT_URLS = self.config.get('defaults', 'urls').split(',')
 
         self.add_option("--revision",
                         action="store", dest="revision",
                         help="revision of the try server build that you wish to run")
-        defaults["revision"]=None
+        defaults["revision"] = None
 
         self.add_option("--host",
                         action="store", dest="host",
@@ -34,28 +62,43 @@ class WptOptions(optparse.OptionParser):
         self.add_option("--username",
                         action="store", dest="username",
                         help="username used to push to try")
-        defaults["username"]=None
+        defaults["username"] = None
 
         self.add_option("--build",
                         action="store", dest="build",
                         help="full url to the build to test (currently only supported is a people.mozilla.org account)")
-        defaults["build"]=None
+        defaults["build"] = None
 
         self.add_option("--link_speed",
                         action="append", dest="linkSpeed",
-                        help="define the link speed to run the test: %s" % ','.join(LINK_SPEEDS))
-        defaults["linkSpeed"]=[]
+                        help="define the link speed to run the test: %s" % ', '.join(self.LINK_SPEEDS))
+        defaults["linkSpeed"] = []
 
         self.add_option("--urls",
                         action="append", dest="urls",
-                        help="url, list of urls, or filename of urls to run tests on")
-        defaults["urls"]=[]
+                        help="list of urls, or filename of urls to run tests on: %s\ndefault: %s" % (', '.join(self.DEFAULT_URLS), 'www.mozilla.org'))
+        defaults["urls"] = []
+
+        self.add_option("--locations",
+                        action="append", dest="locations",
+                        help="list of locations: %s\ndefault: %s" % (', '.join(self.DEFAULT_LOCATIONS), 'wpt-win60-wptdriver:Firefox'))	
+        defaults["locations"] = []
+
+        self.add_option("--runs",
+                        action="store", dest="runs",
+                        help="Number of runs to perform, default: 1")
+        defaults["runs"] = "1"
+
+        self.add_option("--label",
+                        action="store", dest="label",
+                        help="Label of the machine to test, default: user-test")
+        defaults["label"] = "user-test"
 
         self.set_defaults(**defaults)
         usage = """
                   pushwpt.py ssh://hg.mozilla.org/try  <- will find username in ~/.hgrc and get revision from hg push
                   pushwpt.py ssh://username@mozilla.com@hg.moizlla.org/try <- will find rev from push stdout
-                  pushwpt.py ssh://hg.mozilla.org/try --link_speed 3g,dsl --urls www.bbc.co.uk,www.wordpress.com
+                  pushwpt.py ssh://hg.mozilla.org/try --link_speed Native,DSL --urls www.bbc.co.uk,www.wordpress.com
                 """
 
     def verifyOptions(self, options):
@@ -96,8 +139,8 @@ class WptOptions(optparse.OptionParser):
             for opt in options.linkSpeed:
                 ls.extend(opt.split(','))
             for opt in ls:
-                if opt not in LINK_SPEEDS:
-                    print "ERROR: invalid link speed '%s', please use the valid options: %s" % (options.linkSpeed, ','.join(LINK_SPEEDS))
+                if opt not in self.LINK_SPEEDS:
+                    print "ERROR: invalid link speed '%s', please use the valid options: %s" % (options.linkSpeed, ','.join(self.LINK_SPEEDS))
                     sys.exit(1)
             options.linkSpeed = ls
 
@@ -114,6 +157,9 @@ class WptOptions(optparse.OptionParser):
         #TODO: do we want this as a default?
         if not options.urls:
             options.urls = ['www.mozilla.org']
+
+        if not options.locations:
+            options.locations = ['wpt-win60-wptdriver:Firefox']
 
         return options
 
@@ -147,10 +193,17 @@ def getHgLog(options):
 
 def postToWPTQueue(options):
     host = '%s:%s' % (options.host, options.port)
-    options =  {'urls': options.urls, 'speeds': options.linkSpeed, 'email': options.username, 'build': options.build}
+    options =  {'urls': options.urls,
+                'speeds': options.linkSpeed,
+                'email': [options.username],
+                'build': [options.build],
+                'label': [options.label],
+                'runs': options.runs,
+                'locations': options.locations}
+
+    print options
     controller = 'http://%s/wpt-controller/accept-jobs.wsgi' % host
-    r = requests.post(controller, data=json.dumps(options))
-    print r
+    print requests.post(controller, data=json.dumps(options))
     return
 
 def main():

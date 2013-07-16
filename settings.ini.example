@@ -18,5 +18,5 @@ admin_subject = wpt monitor jobs
 admin_loglevel = DEBUG
 
 [defaults]
-locations = bc-winxp01-wptdriver:Firefox,bc-winxp01-wptdriver:Chrome,bc-win61i32-bld-wptdriver:Firefox,bc-win61i32-bld-wptdriver:Chrome,bc-win61i32-bld-wptdriver:IE
-urls = http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/
+locations = wpt-win60-wptdriver:Firefox, wpt-win60-wptdriver:IE, wpt-win60-wptdriver:Chrome
+urls = http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/,http://www.amazon.com,http://baidu.com,http://yahoo.co.jp
