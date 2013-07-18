@@ -1,8 +1,8 @@
-Index: agent/wptdriver/software_update.cc
-===================================================================
---- agent/wptdriver/software_update.cc	(revision 1937)
-+++ agent/wptdriver/software_update.cc	(working copy)
-@@ -41,6 +41,11 @@
+diff --git a/agent/wptdriver/software_update.cc b/agent/wptdriver/software_update.cc
+index d734c95..69bcdbb 100644
+--- a/agent/wptdriver/software_update.cc
++++ b/agent/wptdriver/software_update.cc
+@@ -43,6 +43,11 @@ void SoftwareUpdate::LoadSettings(CString settings_ini) {
          buff, _countof(buff), settings_ini)) {
      _software_url = buff;
    }
@@ -10,11 +10,11 @@ Index: agent/wptdriver/software_update.cc
 +  _software_update_interval_minutes = GetPrivateProfileInt(_T("WebPagetest"),
 +                                                           _T("software_update_interval_minutes"),
 +                                                           SOFTWARE_UPDATE_INTERVAL_MINUTES,
-+                                                           iniFile);
++                                                           settings_ini);
    if (GetPrivateProfileSectionNames(sections, _countof(sections), 
        settings_ini)) {
      TCHAR * section = sections;
-@@ -298,7 +303,7 @@
+@@ -305,7 +310,7 @@ bool SoftwareUpdate::TimeToCheck(void) {
    } else {
      DWORD elapsed = (DWORD)((now.QuadPart - _last_update_check.QuadPart) 
                        / _perf_frequency_minutes.QuadPart);
@@ -23,15 +23,15 @@ Index: agent/wptdriver/software_update.cc
        should_check = true;
      }
    }
-Index: agent/wptdriver/software_update.h
-===================================================================
---- agent/wptdriver/software_update.h	(revision 1937)
-+++ agent/wptdriver/software_update.h	(working copy)
-@@ -29,6 +29,7 @@
+diff --git a/agent/wptdriver/software_update.h b/agent/wptdriver/software_update.h
+index f9be79e..e455fc2 100644
+--- a/agent/wptdriver/software_update.h
++++ b/agent/wptdriver/software_update.h
+@@ -32,6 +32,7 @@ protected:
    CString           _directory;
    LARGE_INTEGER     _last_update_check;
    LARGE_INTEGER     _perf_frequency_minutes;
-+  int               _software_update_interval_minutes;
++  DWORD             _software_update_interval_minutes;
+   WptStatus         &_status;
  
    bool UpdateBrowsers(void);
-   bool InstallSoftware(CString browser, CString file_url, CString md5,
