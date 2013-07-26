@@ -36,7 +36,8 @@ class WptOptions(optparse.OptionParser):
         optparse.OptionParser.__init__(self, **kwargs)
         defaults = {}
         self.config = None
-        self.LINK_SPEEDS = ['Cable', 'DSL', 'Dial', 'Fios', 'Native']
+        self.LINK_SPEEDS = ['Cable', 'DSL', 'Dial', 'Fios', 'Native', '3G',
+                            'Broadband', 'ModernMobile', 'ClassicMobile']
         self.DEFAULT_LOCATIONS = []
         self.DEFAULT_URLS = []
 
@@ -88,6 +89,16 @@ class WptOptions(optparse.OptionParser):
                         action="store", dest="runs",
                         help="Number of runs to perform, default: 1")
         defaults["runs"] = "1"
+
+        self.add_option("--no_tcpdump",
+                        action="store_true", dest="no_tcpdump",
+                        help="Do not perform tcpdump, default : False")
+        defaults["no_tcpdump"] = False
+
+        self.add_option("--no_video",
+                        action="store_true", dest="no_video",
+                        help="Do not record video, default : False")
+        defaults["no_video"] = False
 
         self.add_option("--label",
                         action="store", dest="label",
@@ -199,6 +210,8 @@ def postToWPTQueue(options):
                 'build': [options.build],
                 'label': [options.label],
                 'runs': options.runs,
+                'tcpdump': '' if options.no_tcpdump else 'on',
+                'video': '' if options.no_video else 'on',
                 'locations': options.locations}
 
     print options
