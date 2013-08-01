@@ -23,9 +23,12 @@ import wpt_batch_lib
 
 from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
+from daemonize import Daemon
 
-class JobMonitor:
+class JobMonitor(Daemon):
     def __init__(self, options, createdb=False):
+
+        super(JobMonitor, self).__init__(options)
 
         self.database = options.database
         self.job = None
@@ -589,8 +592,8 @@ class JobMonitor:
                                          self.job["label"],
                                          location))
         msg_body_map = {}
-        result_txt = open("results.txt", "a+")
-        result_json = open("results.json", "a+")
+        #result_txt = open("results.txt", "a+")
+        #result_json = open("results.json", "a+")
         for test_id, test_result in test_results_map.iteritems():
             url = test_url_map[test_id]
             speed = test_speed_map[test_id]
@@ -603,7 +606,7 @@ class JobMonitor:
                                          "Messages: %s\n\n" %
                                          (url, speed, self.results_server,
                                           test_id, msg))
-            result_json.write(json.dumps(test_result) + "\n")
+            #result_json.write(json.dumps(test_result) + "\n")
 
         msg_body_keys = msg_body_map.keys()
         msg_body_keys.sort()
@@ -614,9 +617,9 @@ class JobMonitor:
                 msg_body += msg_body_map[msg_body_key]
         if messages:
             msg_body += "\n\nMessages: %s\n" % messages
-        result_txt.write(msg_body)
-        result_txt.close()
-        result_json.close()
+        #result_txt.write(msg_body)
+        #result_txt.close()
+        #result_json.close()
         self.notify_user(self.job["email"], msg_subject).info(msg_body)
 
     def check_waiting_jobs(self):
@@ -730,9 +733,9 @@ if __name__ == "__main__":
                       action="store",
                       type="string",
                       dest="log",
-                      default="monitor.log",
-                      help="Path to monitor log file. "
-                      "Defaults to monitor.log in current directory.")
+                      default="wptmonitor.log",
+                      help="Path to log file. "
+                      "Defaults to wptmonitor.log in current directory.")
 
     parser.add_option("--settings",
                       action="store",
@@ -741,6 +744,18 @@ if __name__ == "__main__":
                       default="settings.ini",
                       help="Path to configuration file. "
                       "Defauls to settings.ini in current directory.")
+
+    parser.add_option("--pidfile",
+                      action="store",
+                      type="string",
+                      default="/var/run/wptmonitor.pid",
+                      help="File containing process id of wptcontroller "
+                      "if --daemonize is specified.")
+
+    parser.add_option("--daemonize",
+                      action="store_true",
+                      default=False,
+                      help="Runs wptmonitor in daemon mode.")
 
     (options, args) = parser.parse_args()
 

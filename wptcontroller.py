@@ -19,8 +19,8 @@ from cgi import parse_qs, escape
 
 from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
-
-from monitor_jobs import JobMonitor
+from daemonize import Daemon
+from wptmonitor import JobMonitor
 
 def application(environ, start_response):
     email = ""
@@ -256,9 +256,9 @@ if __name__ == "__main__":
                       action="store",
                       type="string",
                       dest="log",
-                      default="accept.log",
-                      help="Path to accepter log file. "
-                      "Defaults to accept.log in current directory.")
+                      default="wptcontroller.log",
+                      help="Path to log file. "
+                      "Defaults to wptcontroller.log in current directory.")
 
     parser.add_option("--settings",
                       action="store",
@@ -266,7 +266,19 @@ if __name__ == "__main__":
                       dest="settings",
                       default="settings.ini",
                       help="Path to configuration file. "
-                      "Defauls to settings.ini in current directory.")
+                      "Defaults to settings.ini in current directory.")
+
+    parser.add_option("--pidfile",
+                      action="store",
+                      type="string",
+                      default="/var/run/wptcontroller.pid",
+                      help="File containing process id of wptcontroller "
+                      "if --daemonize is specified.")
+
+    parser.add_option("--daemonize",
+                      action="store_true",
+                      default=False,
+                      help="Runs wptcontroller in daemon mode.")
 
     (options, args) = parser.parse_args()
 
@@ -276,7 +288,7 @@ if __name__ == "__main__":
 <!DOCTYPE html>
 <html>
   <body>
-    <form method="post" action="wpt-controller.py">
+    <form method="post" action="wpt-controller">
       <p>
         <label>Email: <input type="text" name="email" maxlength="2048"></label>
       </p>
