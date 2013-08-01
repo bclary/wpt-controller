@@ -20,7 +20,7 @@ and make the directory writable by the web server user.
 settings according to your needs:
 
 * Optionally use a rewrite rule on the WebPagetest web server to map
-http://wpt-server:port/accept_jobs.wsgi to a more user friendly
+http://wpt-server:port/wpt-controller.py to a more user friendly
 location such as
 [http://wpt-server/controller](http://wpt-server/controller).
 
@@ -43,7 +43,7 @@ The wpt-controller is configured via the settings.ini file. It consists of 4 sec
 ### server
 
 * server - the external address or dns name of the wpt-server.
-* port - the port on which the accept_jobs.wsgi script will listen.
+* port - the port on which the wpt-controller.py script will listen.
 * sleep_time - time in seconds to wait after finishing a job before polling for the next job.
 * check_minutes - internval in minutes to check builds for availability.
 * api_key - the WebPagetest api key.
@@ -69,5 +69,5 @@ addresses to be sent error messages.
 
 ## Running
 
-sudo su www-data -c 'python accept_jobs.wsgi'
+sudo su www-data -c 'python wpt-controller.py'
 sudo su www-data -c 'python  monitor_jobs.py'

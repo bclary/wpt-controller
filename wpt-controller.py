@@ -276,7 +276,7 @@ if __name__ == "__main__":
 <!DOCTYPE html>
 <html>
   <body>
-    <form method="post" action="accept_jobs.wsgi">
+    <form method="post" action="wpt-controller.py">
       <p>
         <label>Email: <input type="text" name="email" maxlength="2048"></label>
       </p>
