@@ -53,10 +53,8 @@ class JobMonitor(Daemon):
         self.default_locations = config.get("defaults", "locations").split(",")
         self.default_urls = config.get("defaults", "urls").split(",")
 
-        self.mail_username = config.get("mail", "username")
-        self.mail_password = config.get("mail", "password")
-        self.mail_host = config.get("mail", "mailhost")
-
+        self.admin_toaddrs = config.get("admin", "admin_toaddrs").split(",")
+        self.admin_subject = config.get("admin", "admin_subject")
         self.mail_username = config.get("mail", "username")
         self.mail_password = config.get("mail", "password")
         self.mail_host = config.get("mail", "mailhost")
