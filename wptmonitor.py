@@ -16,6 +16,7 @@ import sqlite3
 #import tempfile
 import time
 import urllib
+from dzclient import DatazillaRequest, DatazillaResult, DatazillaResultsCollection
 
 import BeautifulSoup
 # TODO(bc) Replace wpt_batch_lib
@@ -56,8 +57,13 @@ class JobMonitor(Daemon):
         self.mail_password = config.get("mail", "password")
         self.mail_host = config.get("mail", "mailhost")
 
-        self.admin_toaddrs = config.get("admin", "admin_toaddrs").split(",")
-        self.admin_subject = config.get("admin", "admin_subject")
+        self.mail_username = config.get("mail", "username")
+        self.mail_password = config.get("mail", "password")
+        self.mail_host = config.get("mail", "mailhost")
+
+        self.oauth_key = config.get("datazilla", "oauth_consumer_key")
+        self.oauth_secret = config.get("datazilla", "oauth_consumer_secret")
+
         self.admin_loglevel = logging.DEBUG
         try:
             self.admin_loglevel = getattr(logging,
@@ -620,7 +626,58 @@ class JobMonitor(Daemon):
         #result_txt.write(msg_body)
         #result_txt.close()
         #result_json.close()
+        self.post_to_datazilla(test_result, location)
         self.notify_user(self.job["email"], msg_subject).info(msg_body)
+
+    def post_to_datazilla(self, results, location):
+        """ take results (json) and upload them to datazilla """
+
+        osversion = "XP"
+        osname = "Windows"
+        plat = "x86"
+        name = "Firefox"
+        version = "26.0a1"
+        revision = "default"
+        branch = "mozilla-central"
+        buildid = "31415926535"
+
+        if location:
+            if location.index('winxp01') > 0:
+                osversion = "XP"
+                osname = "Windows"
+                plat = "x86"
+            elif location.index('win61i32') > 0:
+                osversion = "7"
+                osname = "Windows"
+                plat = "x86"
+
+        #TODO: (jmaher) make these values not hardcoded
+        collection = DatazillaResultsCollection(machine_name=machine['name'],
+                                                os=osname,
+                                                os_version=osversion,
+                                                platform=plat,
+                                                build_name=name,
+                                                version=version,
+                                                revision=revision,
+                                                branch=branch,
+                                                id=buildid,
+                                                test_date=self.results.date)
+        collection.add_datazilla_result(results)
+
+        req = DatazillaRequest.create("https", "datazilla.mozilla.org", "webpagetest", self.oauth_key, self.oauth_secret, collection)
+        responses = req.submit()
+
+        # print error responses
+        for response in responses:
+            if response.status != 200:
+                # use lower-case string because buildbot is sensitive to upper case error
+                # as in 'INTERNAL SERVER ERROR'
+                # https://bugzilla.mozilla.org/show_bug.cgi?id=799576
+                reason = response.reason.lower()
+                self.logger.debug("Error posting to %s: %s %s" % (url, response.status, reason))
+            else:
+                res = response.read()
+                self.logger.debug("Datazilla response is: %s" % res.lower())
 
     def check_waiting_jobs(self):
         """Check waiting jobs that are older than check_minutes or
