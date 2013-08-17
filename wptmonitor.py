@@ -16,6 +16,8 @@ import sqlite3
 #import tempfile
 import time
 import urllib
+
+from optparse import OptionParser
 from dzclient import DatazillaRequest, DatazillaResult, DatazillaResultsCollection
 
 import BeautifulSoup
@@ -74,7 +76,7 @@ class JobMonitor(Daemon):
 
         # Set up the root logger to log to a daily rotated file log.
         self.logfile = options.log
-        self.logger = logging.getLogger()
+        self.logger = logging.getLogger("wpt")
         self.logger.setLevel(self.admin_loglevel)
         filehandler = TimedRotatingFileHandler(self.logfile,
                                                when="D",
@@ -91,7 +93,7 @@ class JobMonitor(Daemon):
         # should also bubble up to the root logger so we only need to
         # use it for ERROR or CRITICAL messages.
 
-        self.emaillogger = logging.getLogger("email")
+        self.emaillogger = logging.getLogger("wpt.email")
         self.emaillogger.setLevel(logging.ERROR)
         emailhandler = SMTPHandler(self.mail_host,
                                    self.mail_username,
@@ -595,9 +597,8 @@ class JobMonitor(Daemon):
                                          self.job["build"],
                                          self.job["label"],
                                          location))
+        test_results = []
         msg_body_map = {}
-        #result_txt = open("results.txt", "a+")
-        #result_json = open("results.json", "a+")
         for test_id, test_result in test_results_map.iteritems():
             url = test_url_map[test_id]
             speed = test_speed_map[test_id]
@@ -610,7 +611,7 @@ class JobMonitor(Daemon):
                                          "Messages: %s\n\n" %
                                          (url, speed, self.results_server,
                                           test_id, msg))
-            #result_json.write(json.dumps(test_result) + "\n")
+            test_results.append(test_result)
 
         msg_body_keys = msg_body_map.keys()
         msg_body_keys.sort()
@@ -621,10 +622,18 @@ class JobMonitor(Daemon):
                 msg_body += msg_body_map[msg_body_key]
         if messages:
             msg_body += "\n\nMessages: %s\n" % messages
-        #result_txt.write(msg_body)
-        #result_txt.close()
-        #result_json.close()
-        self.post_to_datazilla(test_result, location)
+        ###
+        import os.path
+        logdir = os.path.dirname(self.logfile)
+        timestr = datetime.datetime.now().isoformat()
+        result_txt = open(os.path.join(logdir, "results-%s.txt" % timestr), "a+")
+        result_txt.write(msg_body)
+        result_txt.close()
+        result_json = open(os.path.join(logdir, "results-%s.json" % timestr), "a+")
+        result_json.write(json.dumps(test_results, indent=4, sort_keys=True) + "\n")
+        result_json.close()
+        ###
+        #self.post_to_datazilla(test_result, location)
         self.notify_user(self.job["email"], msg_subject).info(msg_body)
 
     def post_to_datazilla(self, results, location):
@@ -650,7 +659,7 @@ class JobMonitor(Daemon):
                 plat = "x86"
 
         #TODO: (jmaher) make these values not hardcoded
-        collection = DatazillaResultsCollection(machine_name=machine['name'],
+        collection = DatazillaResultsCollection(machine_name=location,
                                                 os=osname,
                                                 os_version=osversion,
                                                 platform=plat,
@@ -659,7 +668,7 @@ class JobMonitor(Daemon):
                                                 revision=revision,
                                                 branch=branch,
                                                 id=buildid,
-                                                test_date=self.results.date)
+                                                test_date=datetime.datetime.now())
         collection.add_datazilla_result(results)
 
         req = DatazillaRequest.create("https", "datazilla.mozilla.org", "webpagetest", self.oauth_key, self.oauth_secret, collection)
@@ -770,9 +779,7 @@ class JobMonitor(Daemon):
                  started, timestamp) = jobrow
                 self.purge_job(jobid)
 
-if __name__ == "__main__":
-
-    from optparse import OptionParser
+def main():
 
     parser = OptionParser()
 
@@ -820,8 +827,17 @@ if __name__ == "__main__":
 
     jm = JobMonitor(options)
 
-    while True:
-        jm.check_waiting_jobs()
-        jm.check_running_jobs()
-        jm.process_job()
-        time.sleep(jm.sleep_time)
+    try:
+        while True:
+            jm.check_waiting_jobs()
+            jm.check_running_jobs()
+            jm.process_job()
+            time.sleep(jm.sleep_time)
+    except:
+        jm.emaillogger.exception("Terminating wptmonitor due to "
+                                   "unhandled exception: ")
+        exit(2)
+
+if __name__ == "__main__":
+    main()
+
