@@ -210,8 +210,8 @@ def postToWPTQueue(options):
                 'build': [options.build],
                 'label': [options.label],
                 'runs': options.runs,
-                'tcpdump': '' if options.no_tcpdump else 'on',
-                'video': '' if options.no_video else 'on',
+                'tcpdump': [''] if options.no_tcpdump else ['on'],
+                'video': [''] if options.no_video else ['on'],
                 'locations': options.locations}
 
     print options
