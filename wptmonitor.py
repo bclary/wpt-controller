@@ -12,13 +12,15 @@ import logging
 import os
 import random
 import re
+import shutil
 import sqlite3
-#import tempfile
+import subprocess
+import tempfile
 import time
 import urllib
 
 from optparse import OptionParser
-from dzclient import DatazillaRequest, DatazillaResult, DatazillaResultsCollection
+from dzclient import DatazillaRequest, DatazillaResult
 
 import BeautifulSoup
 # TODO(bc) Replace wpt_batch_lib
@@ -51,6 +53,11 @@ class JobMonitor(Daemon):
         self.api_key = config.get("server", "api_key")
         self.firefoxpath = config.get("server", "firefoxpath")
         self.firefoxdatpath = config.get("server", "firefoxdatpath")
+        self.build_name = None
+        self.build_version = None
+        self.build_id = None
+        self.build_branch = None
+        self.build_revision = None
 
         self.default_locations = config.get("defaults", "locations").split(",")
         self.default_urls = config.get("defaults", "urls").split(",")
@@ -364,6 +371,30 @@ class JobMonitor(Daemon):
                  self.admin_toaddrs))
             return False
 
+        # Get information about the build by extracting the installer
+        # to a temporary directory and parsing the application.ini file.
+        tempdirectory = tempfile.mkdtemp()
+        returncode = subprocess.call(["7z", "x", self.firefoxpath,
+                                      "-o%s" % tempdirectory])
+        appini = ConfigParser.RawConfigParser()
+        appini.readfp(open("%s/core/application.ini" % tempdirectory))
+        self.build_name = appini.get("App", "name")
+        self.build_version = appini.get("App", "version")
+        self.build_id = appini.get("App", "buildID")
+        self.build_branch = os.path.basename(appini.get("App", "SourceRepository"))
+        self.build_revision = appini.get("App", "SourceStamp")
+
+        self.logger.debug("build_name: %s" % self.build_name)
+        self.logger.debug("build_version: %s" % self.build_version)
+        self.logger.debug("build_id: %s" % self.build_id)
+        self.logger.debug("build_branch: %s" % self.build_branch)
+        self.logger.debug("build_revision: %s" % self.build_revision)
+
+        if returncode != 0:
+            raise Exception("download_build: "
+                            "error extracting build: rc=%d" % returncode)
+        shutil.rmtree(tempdirectory)
+
         # delay after updating firefox.dat to give the clients time to
         # check for the updated build.
         time.sleep(120)
@@ -566,27 +597,13 @@ class JobMonitor(Daemon):
         if messages:
             messages = "\n" + messages
 
-        # 'GetJSONResult'
-        test_results_map = {}
-        for test_id in test_url_map.keys():
-            self.logger.debug("Getting result for test %s" % test_id)
-            result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
-                                                               test_id)
-            self.logger.debug("result_url %s" % result_url)
-            result_response = urllib.urlopen(result_url)
-            if result_response.getcode() == 200:
-                test_results_map[test_id] = json.loads(result_response.read())
-            else:
-                add_msg(test_msg_map, test_id, "failed to retrieve results")
-
         self.process_test_results(location, test_speed_map, test_url_map,
-                                  test_results_map, test_msg_map, messages)
+                                  test_msg_map, messages)
 
     def process_test_results(self, location, test_speed_map, test_url_map,
-                             test_results_map, test_msg_map, messages):
+                             test_msg_map, messages):
         """Process test results, notifying user of the results.
         """
-        # TODO(bc) submit to datazilla.
 
         msg_subject = ("Your webpagetest job %s "
                        "build %s, label %s for location %s, completed.\n\n" %
@@ -597,21 +614,53 @@ class JobMonitor(Daemon):
                                          self.job["build"],
                                          self.job["label"],
                                          location))
-        test_results = []
         msg_body_map = {}
-        for test_id, test_result in test_results_map.iteritems():
+        for test_id in test_url_map.keys():
             url = test_url_map[test_id]
             speed = test_speed_map[test_id]
+            msg_body_key = url + speed
+
             try:
                 msg = test_msg_map[test_id]
             except KeyError:
                 msg = "None"
-            msg_body_map[url + speed] = ("Url: %s, Speed: %s, "
-                                         "Result: http://%s/result/%s/\n"
-                                         "Messages: %s\n\n" %
-                                         (url, speed, self.results_server,
-                                          test_id, msg))
-            test_results.append(test_result)
+            msg_body_map[msg_body_key] = ("Url: %s, Speed: %s, "
+                                          "Result: http://%s/result/%s/\n"
+                                          "Messages: %s\n\n" %
+                                          (url, speed, self.results_server,
+                                           test_id, msg))
+            result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
+                                                               test_id)
+            self.logger.debug("Getting result for test %s result_url %s" %
+                              (test_id, result_url))
+            result_response = urllib.urlopen(result_url)
+            if result_response.getcode() != 200:
+                msg = ("Failed to retrieve results from Webpagetest for job %s "
+                       "for build %s, label %s failed." %
+                       (self.job["id"], self.job["build"], self.job["label"]))
+                msg_body_map[msg_body_key] += msg
+                self.emaillogger.exception(msg)
+            else:
+                test_result = json.loads(result_response.read())
+                result_response = None
+                try:
+                    self.post_to_datazilla(test_result)
+                except:
+                    msg = ("Failed to submit result to datazilla for job %s "
+                           "for build %s, label %s failed." %
+                           (self.job["id"], self.job["build"], self.job["label"]))
+                    msg_body_map[msg_body_key] += msg
+                    self.emaillogger.exception(msg)
+                if self.admin_loglevel == logging.DEBUG:
+                    import os.path
+                    logdir = os.path.dirname(self.logfile)
+                    result_txt = open(os.path.join(logdir, "results-%s.txt" % test_id), "a+")
+                    result_txt.write(msg_body)
+                    result_txt.close()
+                    result_json = open(os.path.join(logdir, "results-%s.json" % test_id), "a+")
+                    result_json.write(json.dumps(test_result, indent=4, sort_keys=True) + "\n")
+                    result_json.close()
+                test_result = None
 
         msg_body_keys = msg_body_map.keys()
         msg_body_keys.sort()
@@ -622,69 +671,121 @@ class JobMonitor(Daemon):
                 msg_body += msg_body_map[msg_body_key]
         if messages:
             msg_body += "\n\nMessages: %s\n" % messages
-        ###
-        import os.path
-        logdir = os.path.dirname(self.logfile)
-        timestr = datetime.datetime.now().isoformat()
-        result_txt = open(os.path.join(logdir, "results-%s.txt" % timestr), "a+")
-        result_txt.write(msg_body)
-        result_txt.close()
-        result_json = open(os.path.join(logdir, "results-%s.json" % timestr), "a+")
-        result_json.write(json.dumps(test_results, indent=4, sort_keys=True) + "\n")
-        result_json.close()
-        ###
-        #self.post_to_datazilla(test_result, location)
         self.notify_user(self.job["email"], msg_subject).info(msg_body)
 
-    def post_to_datazilla(self, results, location):
-        """ take results (json) and upload them to datazilla """
+    def post_to_datazilla(self, test_result):
+        """ take test_results (json) and upload them to datazilla """
 
-        osversion = "XP"
-        osname = "Windows"
-        plat = "x86"
-        name = "Firefox"
-        version = "26.0a1"
-        revision = "default"
-        branch = "mozilla-central"
-        buildid = "31415926535"
+        # We will attach wpt_data to the datazilla result as a top
+        # level attribute to store out of band data about the test.
+        wpt_data = {
+            "url": "",
+            "firstView": {},
+            "repeatView": {}
+        }
+        wpt_data["label"] = test_result["data"]["label"]
+        if 'automatic' not in wpt_data["label"]:
+            # Only submit automatic builds to Datazilla.
+            return
 
-        if location:
-            if location.index('winxp01') > 0:
-                osversion = "XP"
-                osname = "Windows"
-                plat = "x86"
-            elif location.index('win61i32') > 0:
-                osversion = "7"
-                osname = "Windows"
-                plat = "x86"
+        wpt_data["connectivity"] = test_result["data"]["connectivity"]
+        wpt_data["location"] = test_result["data"]["location"]
+        wpt_data["url"] = test_result["data"]["url"]
+        runs = test_result["data"]["runs"]
 
-        #TODO: (jmaher) make these values not hardcoded
-        collection = DatazillaResultsCollection(machine_name=location,
-                                                os=osname,
-                                                os_version=osversion,
-                                                platform=plat,
-                                                build_name=name,
-                                                version=version,
-                                                revision=revision,
-                                                branch=branch,
-                                                id=buildid,
-                                                test_date=datetime.datetime.now())
-        collection.add_datazilla_result(results)
+        # runs[0] is a dummy entry
+        # runs[1]["firstView"]["SpeedIndex"]
+        # runs[1]["repeatView"]["SpeedIndex"]
+        # runs[1]["firstView"]["requests"][0]["headers"]["request"][2]
+        #    "User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:26.0) Gecko/20100101 Firefox/26.0 PTST/125"
 
-        req = DatazillaRequest.create("https", "datazilla.mozilla.org", "webpagetest", self.oauth_key, self.oauth_secret, collection)
-        responses = req.submit()
+        wpt_metric_keys = ['TTFB', 'render', 'docTime', 'fullyLoaded',
+                           'SpeedIndex', 'SpeedIndexDT', 'bytesInDoc',
+                           'requestsDoc', 'domContentLoadedEventStart',
+                           'visualComplete']
+        for wpt_key in wpt_metric_keys:
+            for view in "firstView", "repeatView":
+                wpt_data[view][wpt_key] = []
 
-        # print error responses
-        for response in responses:
+        if len(runs) == 1:
+            raise Exception("post_to_datazilla: no runs")
+        os_version = "unknown"
+        os_name = "unknown"
+        platform = "x86"
+        reUserAgent = re.compile('User-Agent: Mozilla/5.0 \(Windows NT ([^;]*);.*')
+        for run in runs:
+            for wpt_key in wpt_metric_keys:
+                for view in "firstView", "repeatView":
+                    if not run[view]:
+                        continue
+                    if wpt_key in run[view]:
+                        if run[view][wpt_key]:
+                            wpt_data[view][wpt_key].append(run[view][wpt_key])
+                    if os_name == "unknown":
+                        try:
+                            requests = run[view]["requests"]
+                            if requests and len(requests) > 0:
+                                request = requests[0]
+                                if request:
+                                    headers = request["headers"]
+                                    if headers:
+                                        request_headers = headers["request"]
+                                        if request_headers:
+                                            for request_header in request_headers:
+                                                if "User-Agent" in request_header:
+                                                    match = re.match(reUserAgent,
+                                                                     request_header)
+                                                    if match:
+                                                        os_name = "WINNT"
+                                                        os_version = match.group(1)
+                                                        break
+                        except KeyError:
+                            pass
+
+        machine_name = wpt_data["location"].split(":")[0]
+        # limit suite name to 128 characters to match mysql column size
+        suite_name = (wpt_data["location"] + "." + wpt_data["connectivity"])[:128]
+        # limit {first,repeat}_name, to 255 characters to match mysql column size
+        # leave protocol in the url in order to distinguish http vs https.
+        first_name = wpt_data["url"][:252] + ":fv"
+        repeat_name = wpt_data["url"][:252] + ":rv"
+        result = DatazillaResult()
+        result.add_testsuite(suite_name)
+        result.add_test_results(suite_name, first_name, wpt_data["firstView"]["SpeedIndex"])
+        result.add_test_results(suite_name, repeat_name, wpt_data["repeatView"]["SpeedIndex"])
+        request = DatazillaRequest("https",
+                                   "datazilla.mozilla.org",
+                                   "webpagetest",
+                                   self.oauth_key,
+                                   self.oauth_secret,
+                                   machine_name=machine_name,
+                                   os=os_name,
+                                   os_version=os_version,
+                                   platform=platform,
+                                   build_name=self.build_name,
+                                   version=self.build_version,
+                                   revision=self.build_revision,
+                                   branch=self.build_branch,
+                                   id=self.build_id)
+        request.add_datazilla_result(result)
+        datasets = request.datasets()
+        for dataset in datasets:
+            dataset["wpt_data"] = wpt_data
+            response = request.send(dataset)
+            # print error responses
             if response.status != 200:
                 # use lower-case string because buildbot is sensitive to upper case error
                 # as in 'INTERNAL SERVER ERROR'
                 # https://bugzilla.mozilla.org/show_bug.cgi?id=799576
                 reason = response.reason.lower()
-                self.logger.debug("Error posting to %s: %s %s" % (url, response.status, reason))
+                self.logger.debug("Error posting to %s %s %s: %s %s" % (
+                    wpt_data["url"], wpt_data["location"], wpt_data["connectivity"],
+                    response.status, reason))
             else:
                 res = response.read()
-                self.logger.debug("Datazilla response is: %s" % res.lower())
+                self.logger.debug("Datazilla response for %s %s %s is: %s" % (
+                    wpt_data["url"], wpt_data["location"], wpt_data["connectivity"],
+                    res.lower()))
 
     def check_waiting_jobs(self):
         """Check waiting jobs that are older than check_minutes or
