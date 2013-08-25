@@ -28,7 +28,7 @@ DAEMON=$DAEMON_DIR/$NAME.py
 SETTINGSFILE=$DAEMON_DIR/settings.ini
 PIDFILE=/var/run/wptcontroller/$NAME.pid
 LOGFILE=/var/log/wptcontroller/$NAME.log
-DBFILE=/var/run/wptcontroller/jobs.sqlite
+DBFILE=/var/log/wptcontroller/jobs.sqlite
 SCRIPTNAME=/etc/init.d/$NAME
 DAEMON_ARGS="--daemonize --pidfile $PIDFILE --settings $SETTINGSFILE --database $DBFILE --log $LOGFILE"
 
