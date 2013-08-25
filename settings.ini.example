@@ -24,5 +24,5 @@ oauth_consumer_key = <guid>
 oauth_consumer_secret = <guid>
 
 [defaults]
-locations = wpt-win60-wptdriver:Firefox, wpt-win60-wptdriver:IE, wpt-win60-wptdriver:Chrome
+locations = wpt-win60w:Firefox, wpt-win60w:IE, wpt-win60w:Chrome
 urls = http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/,http://www.amazon.com,http://baidu.com,http://yahoo.co.jp

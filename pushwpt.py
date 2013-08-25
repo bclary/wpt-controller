@@ -82,7 +82,7 @@ class WptOptions(optparse.OptionParser):
 
         self.add_option("--locations",
                         action="append", dest="locations",
-                        help="list of locations: %s\ndefault: %s" % (', '.join(self.DEFAULT_LOCATIONS), 'bc-winxp01-wptdriver:Firefox'))	
+                        help="list of locations: %s\ndefault: %s" % (', '.join(self.DEFAULT_LOCATIONS), 'bc-winxp01w:Firefox'))	
         defaults["locations"] = []
 
         self.add_option("--runs",
@@ -170,7 +170,7 @@ class WptOptions(optparse.OptionParser):
             options.urls = ['www.mozilla.org']
 
         if not options.locations:
-            options.locations = ['bc-winxp01-wptdriver:Firefox']
+            options.locations = ['bc-winxp01w:Firefox']
 
         return options
 

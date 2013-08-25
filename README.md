@@ -296,29 +296,30 @@ default=bc-winxp01
 
 ;
 ; For each machine name listed in [locations], create a section
-; which specifies browser configuration section. In this example
-; we only use wptdriver.
+; which specifies the browser configuration sections for that
+; location. In this example we use wptdriver configurations which
+; are signified by the "w" suffix on the machine/location name.
 ;
 [bc-winxp01]
-1=bc-winxp01-wptdriver
+1=bc-winxp01w
 label=bc-winxp01
 
 [bc-win61i32-bld]
-1=bc-win61i32-bld-wptdriver
+1=bc-win61i32-bldw
 label=bc-win61i32-bld
 
 ;
 ; For each browser configuration section named above, create
 ; a section which defines the supported browser.
 ;
-[bc-winxp01-wptdriver]
+[bc-winxp01w]
 browser=Chrome,Firefox
-label="bc-winxp01-wptdriver"
+label="bc-winxp01w"
 key=XXXXXX
 
-[bc-win61i32-bld-wptdriver]
+[bc-win61i32-bldw]
 browser=Chrome,Firefox
-label="bc-win61i32-bld-wptdriver"
+label="bc-win61i32-bldw"
 key=XXXXXX
 </pre>
 
@@ -576,7 +577,7 @@ recording Web Page Replay server wpr-server-record is located at 192.168.1.34.
 [WebPagetest]
 url=http://192.168.1.29/
 web_page_replay_host=192.168.1.34
-location=bc-winxp01-wptdriver
+location=bc-winxp01w
 browser=chrome
 Time Limit=300
 key=XXXXXX
@@ -614,7 +615,7 @@ to record each test url prior to testing it.
 <pre>
 [WebPagetest]
 url=http://192.168.1.29/
-location=bc-win61i32-bld-wptdriver
+location=bc-win61i32-bldw
 browser=chrome
 Time Limit=300
 key=XXXXXX
