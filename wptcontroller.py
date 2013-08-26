@@ -33,9 +33,21 @@ def application(environ, start_response):
     speeds = []
     urls = []
 
-    if "REQUEST_METHOD" in environ and environ["REQUEST_METHOD"] == "GET":
-        pass
-    elif "REQUEST_METHOD" in environ and environ["REQUEST_METHOD"] == "POST":
+    if "REQUEST_METHOD" not in environ:
+        status = "501 Not Implemented"
+        response_body = "Missing REQUEST_METHOD: %s" % status
+        response_headers = [("Content-Type", "text/html"),
+                            ("Content-Length", str(len(response_body)))]
+        start_response(status, response_headers)
+        return [str(response_body)]
+
+    if not environ["REQUEST_METHOD"] in "GET,POST":
+        status = "405 Method Not Allowed"
+        response_headers = [("Allow", "GET,POST")]
+        start_response(status, response_headers)
+        return []
+
+    if environ["REQUEST_METHOD"] == "POST":
         # the environment variable CONTENT_LENGTH may be empty or missing
         try:
             request_body_size = int(environ.get("CONTENT_LENGTH", 0))
@@ -141,8 +153,11 @@ def application(environ, start_response):
                                "Your webpagetest job failed").exception(msg)
                 jm.purge_job(jobid)
                 raise
-    else:
-        pass  # error?
+
+        status = "302 Found"
+        response_headers = [("Location", "/wpt-controller")]
+        start_response(status, response_headers)
+        return []
 
     currentteststable = ""
 
@@ -154,7 +169,7 @@ def application(environ, start_response):
         raise
 
     if jobrows:
-        currentteststable = "<table>"
+        currentteststable = "<table><caption>Current Tests</caption>"
 
     for jobrow in jobrows:
         jobid = jobrow[0]
@@ -191,13 +206,13 @@ def application(environ, start_response):
 
         currentteststable += (
             "<tr>" +
-            "<th>jobs id</th><th>jobs email</th><th>jobs build</th>" +
-            "<th>jobs label</th><th>jobs runs</th><th>jobs tcpdump</th>" +
-            "<th>jobs video</th><th>jobs status</th><th>jobs started</th>" +
-            "<th>jobs timestamp</th><th>locations id</th>" +
-            "<th>locations location</th><th>locations jobid</th>" +
-            "<th>speeds id</th><th>speeds speed</th><th>speeds job id</th>" +
-            "<th>urls id</th><th>urls url</th><th>urls jobid</th>" +
+            "<th>job id</th><th>user email</th><th>build</th>" +
+            "<th>label</th><th>runs</th><th>tcpdump</th>" +
+            "<th>video</th><th>status</th><th>started</th>" +
+            "<th>timestamp</th>" +
+            "<th>location</th>" +
+            "<th>speed</th>" +
+            "<th>url</th>" +
             "</tr>")
 
         for locationrow in locationrows:
@@ -205,38 +220,30 @@ def application(environ, start_response):
                 for urlrow in urlrows:
                     args = []
                     args.extend(jobrow)
-                    args.extend(locationrow)
-                    args.extend(speedrow)
-                    args.extend(urlrow)
+                    args.append(locationrow[1])
+                    args.append(speedrow[1])
+                    args.append(urlrow[1])
 
                     currentteststable += (
                         ("<tr>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td>" +
+                         "<td>%s</td>" +
+                         "<td>%s</td>" +
+                         "<td>%s</td>" +
                          "</tr>") % tuple(args))
 
     if jobrows:
         currentteststable += "</table>"
 
-    response_body = html % (email or "Empty",
-                            build or "Empty",
-                            label or "Empty",
-                            runs or "Empty",
-                            tcpdump or "No",
-                            video or "No",
-                            ", ".join(locations or ["No Locations"]),
-                            ", ".join(speeds or ["No Speeds"]),
-                            "\n".join(urls or ["No urls"]),
-                            currentteststable)
+    response_body = html % currentteststable
     status = "200 OK"
     response_headers = [("Content-Type", "text/html"),
                         ("Content-Length", str(len(response_body)))]
     start_response(status, response_headers)
     return [str(response_body)]
-
 
 if __name__ == "__main__":
 
@@ -287,81 +294,78 @@ if __name__ == "__main__":
     html = """
 <!DOCTYPE html>
 <html>
+  <title>Mozilla WebPagetest Controller</title>
+  <style type="text/css">
+    caption, label {font-weight: bold;}
+    #wrapper { margin-left: auto; margin-right: auto; width: 50%% }
+  </style>
   <body>
-    <form method="post" action="wpt-controller">
-      <p>
-        <label>Email: <input type="text" name="email" maxlength="2048"></label>
-      </p>
-      <p>
-        <label>Build: <input type="text" name="build"></label>
-      </p>
-      <p>
-        <label>Label: <input type="text" name="label"></label>
-      </p>
-      <p>
-        <label>Runs: <input type="text" name="runs" value="1"></label>
-      </p>
-      <p>
-        <label>tcpdump: <input type="checkbox" name="tcpdump" checked="checked">
-        </label>
-      </p>
-      <p>
-        <label>video: <input type="checkbox" name="video" checked="checked">
-        </label>
-      </p>
-      <p>
-        <!--
-          These are the predefined connection speeds in webpagetest's
-          settings/connectivity.ini. We can add additional speeds there
-          by adding new sections and listing the options here.
-        -->
-        <label>Speeds:
-          <select name="speeds" multiple>
-            <option value="Broadband">Broadband (10 Mbps/10Mbps 90ms RTT)</option>
-            <option value="ModernMobile">Modern Mobile (1 Mbps/1Mbps 150ms RTT)</option>
-            <option value="ClassicMobile">Classic Mobile (400 Kbps/400 Kbps 300ms RTT)</option>
-            <option value="Native">Native Connection (No Traffic Shaping)</option>
-            <option value="Fios">FIOS (20/5 Mbps 4ms RTT</option>
-            <option value="Cable">Cable (5/1 Mbps 28ms RTT)</option>
-            <option value="DSL">DSL (1.5 Mbps/384 Kbps 50ms RTT)</option>
-            <option value="3G">3G (1.6 Mbps/768 Kbps 300ms RTT)</option>
-            <option value="Dial">56K Dial-Up (49/30 Kbps 120ms RTT)</option>
-          </select>
-        </label>
-      </p>
-      <p>
-        <label>URLS:
-          <select name="urls" multiple>"""
-    html += "".join(["<option>" + url + "</option>" for url in jm.default_urls])
-    html += """
-          </select>
-        </label>
+    <div id="wrapper">
+      <h1>Mozilla WebPagetest Controller</h1>
+      <form method="post" action="wpt-controller">
+        <p>
+          <label>Email: <input type="text" name="email" maxlength="2048"></label>
         </p>
         <p>
-          <label>Locations:
-            <select name="locations" multiple>"""
-    html += "".join(["<option>" + location + "</option>" for location in
-                     jm.default_locations])
-    html += """
-            </select>
+          <label>Build: <input type="text" name="build"></label>
+        </p>
+        <p>
+          <label>Label: <input type="text" name="label"></label>
+        </p>
+        <p>
+          <label>Runs: <input type="text" name="runs" value="1"></label>
+        </p>
+        <p>
+          <label>tcpdump: <input type="checkbox" name="tcpdump" checked="checked">
           </label>
+        </p>
+        <p>
+          <label>video: <input type="checkbox" name="video" checked="checked">
+          </label>
+        </p>
+        <p>
+          <!--
+            These are the predefined connection speeds in webpagetest's
+            settings/connectivity.ini. We can add additional speeds there
+            by adding new sections and listing the options here.
+          -->
+          <label for="speeds">Speeds:</label>
+        </p>
+        <select id="speeds" name="speeds" size="9" multiple>
+          <option value="Broadband">Broadband (10 Mbps/10Mbps 90ms RTT)</option>
+          <option value="ModernMobile">Modern Mobile (1 Mbps/1Mbps 150ms RTT)</option>
+          <option value="ClassicMobile">Classic Mobile (400 Kbps/400 Kbps 300ms RTT)</option>
+          <option value="Native">Native Connection (No Traffic Shaping)</option>
+          <option value="Fios">FIOS (20/5 Mbps 4ms RTT</option>
+          <option value="Cable">Cable (5/1 Mbps 28ms RTT)</option>
+          <option value="DSL">DSL (1.5 Mbps/384 Kbps 50ms RTT)</option>
+          <option value="3G">3G (1.6 Mbps/768 Kbps 300ms RTT)</option>
+          <option value="Dial">56K Dial-Up (49/30 Kbps 120ms RTT)</option>
+        </select>
+        <p>
+          <label for="urls">URLS:</label>
+        </p>"""
+    html += ("<select id='urls' name='urls' size='" +
+             str(len(jm.default_urls)) + "' multiple>" +
+             "".join(["<option>" +
+                      url +
+                      "</option>" for url in jm.default_urls]) +
+             "</select>")
+    html += """
+        <p>
+          <label for="locations">Locations:</label>
+        </p>
+        <select id="location" name="locations" multiple>"""
+    html += "".join(["<option>" + location + "</option>" for location in
+                       jm.default_locations])
+    html += """
+        </select>
         <p>
           <input type="submit" value="Submit">
         </p>
-      </form>
-      <p>
-        Email: %s<br>
-        Build: %s<br>
-        Label: %s<br>
-        Runs: %s<br>
-        tcpdump: %s<br>
-        video: %s<br>
-        Locations: %s<br>
-        Speeds: %s<br>
-        URLS: %s<br>
-      </p>
-      <p>Current Tests</p>
-       %s
+        </form>
+        %s
+    </div>
   </body>
 </html>
 """
