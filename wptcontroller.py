@@ -90,6 +90,12 @@ def application(environ, start_response):
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
 
+        jm.set_job(None, email, build, label, runs, tcpdump, video,
+                   None, None, None)
+        jm.job.locations = locations
+        jm.job.speeds = speeds
+        jm.job.urls = urls
+
         try:
             jm.cursor.execute(
                 "insert into jobs(email, build, label, runs, tcpdump, video, "
@@ -98,13 +104,10 @@ def application(environ, start_response):
                 (email, build, label, runs, tcpdump, video, "waiting",
                  datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
             jm.connection.commit()
-            jobid = jm.cursor.lastrowid
+            jm.job.id = jobid = jm.cursor.lastrowid
         except sqlite3.OperationalError:
-            msg = ("SQLError inserting job: email: %s, build: %s, label: %s, "
-                   "runs: %s, tcpdump: %s, video: %s" %
-                   (email, build, label, runs, tcpdump, video))
-            jm.emaillogger.exception(msg)
-            jm.notify_user(email, "Your webpagetest job failed").exception(msg)
+            jm.notify_admin_exception("Error inserting job")
+            jm.notify_user_exception(email, "Error inserting job")
             raise
 
         for location in locations:
@@ -115,12 +118,8 @@ def application(environ, start_response):
                     (location, jobid))
                 jm.connection.commit()
             except sqlite3.OperationalError:
-                msg = ("SQLError inserting location: email: %s, build: %s, "
-                       "label: %s, location: %s" % (email, build, label,
-                                                    location))
-                jm.emaillogger.exception(msg)
-                jm.notify_user(email,
-                               "Your webpagetest job failed").exception(msg)
+                jm.notify_admin_exception("Error inserting location")
+                jm.notify_user_exception(email, "Error inserting location")
                 jm.purge_job(jobid)
                 raise
 
@@ -133,9 +132,8 @@ def application(environ, start_response):
             except sqlite3.OperationalError:
                 msg = ("SQLError inserting speed: email: %s, build: %s, "
                        "label: %s, location: %s" % (email, build, label, speed))
-                jm.emaillogger.exception(msg)
-                jm.notify_user(email,
-                               "Your webpagetest job failed").exception(msg)
+                jm.notify_admin_exception("Error inserting speed")
+                jm.notify_user_exception(email, "Error inserting speed")
                 jm.purge_job(jobid)
                 raise
 
@@ -148,12 +146,12 @@ def application(environ, start_response):
             except sqlite3.OperationalError:
                 msg = ("SQLError inserting url: email: %s, build: %s, "
                        "label: %s, url: %s" % (email, build, label, url))
-                jm.emaillogger.exception(msg)
-                jm.notify_user(email,
-                               "Your webpagetest job failed").exception(msg)
+                jm.notify_admin_exception("Error inserting url")
+                jm.notify_user_exception(email, "Error inserting url")
                 jm.purge_job(jobid)
                 raise
 
+        jm.notify_user_info(email, "job submitted")
         status = "302 Found"
         response_headers = [("Location", "/wpt-controller")]
         start_response(status, response_headers)
@@ -165,23 +163,26 @@ def application(environ, start_response):
         jm.cursor.execute("select * from jobs")
         jobrows = jm.cursor.fetchall()
     except sqlite3.OperationalError:
-        jm.emaillogger.exception("SQLError selecting jobs.")
+        jm.notify_admin_exception("Error displaying current jobs")
         raise
 
     if jobrows:
         currentteststable = "<table><caption>Current Tests</caption>"
 
     for jobrow in jobrows:
-        jobid = jobrow[0]
+        (jobid, email, build, label, runs, tcpdump, video, status, started,
+         timestamp) = jobrow
+        jm.set_job(jobid, email, build, label, runs, tcpdump, video,
+                   status, started, timestamp)
         try:
             jm.cursor.execute(
                 "select * from locations where jobid=:jobid",
                 {"jobid": jobid})
             locationrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            jm.emaillogger.exception(
-                "SQLError selecting locations for job %s." %
-                jobid)
+            jm.notify_admin_exception("Error displaying current jobs",
+                                      "SQLError selecting locations for job %s." %
+                                      jobid)
             raise
 
         try:
@@ -190,8 +191,9 @@ def application(environ, start_response):
                 {"jobid": jobid})
             speedrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            jm.emaillogger.exception("SQLError selecting speeds for job %s." %
-                                     jobid)
+            jm.notify_admin_exception("Error displaying current jobs",
+                                      "SQLError selecting speeds for job %s." %
+                                      jobid)
             raise
 
         try:
@@ -200,8 +202,9 @@ def application(environ, start_response):
                 {"jobid": jobid})
             urlrows = jm.cursor.fetchall()
         except sqlite3.OperationalError:
-            jm.emaillogger.exception("SQLError selecting urls for job %s." %
-                                     jobid)
+            jm.notify_admin_exception("Error displaying current jobs",
+                                      "SQLError selecting urls for job %s." %
+                                      jobid)
             raise
 
         currentteststable += (
@@ -369,6 +372,11 @@ if __name__ == "__main__":
   </body>
 </html>
 """
-    httpd = make_server("localhost", jm.port, application)
-    httpd.serve_forever()
+    try:
+        httpd = make_server("localhost", jm.port, application)
+        httpd.serve_forever()
+    except:
+        jm.notify_admin_exception("Error in wsgi server",
+                                  "wptcontroller has terminated due to an uncaught exception.")
+
 

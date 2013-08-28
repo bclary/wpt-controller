@@ -30,6 +30,61 @@ from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
 from daemonize import Daemon
 
+class Job(object):
+    def __init__(self, jobmonitor, jobid, email, build, label, runs, tcpdump,
+                 video, status, started, timestamp):
+        self.jm = jobmonitor
+        self.id = jobid
+        self.email = email
+        self.build = build
+        self.label = label
+        self.runs = runs
+        self.tcpdump = tcpdump
+        self.video = video
+        if jobid:
+            self.locations = self.get_locations(jobmonitor, jobid)
+            self.speeds = self.get_speeds(jobmonitor, jobid)
+            self.urls = self.get_urls(jobmonitor, jobid)
+        else:
+            self.locations = None
+            self.speeds = None
+            self.urls = None
+        self.status = status
+        self.started = started
+        self.timestamp = timestamp
+
+    # Don't capture exceptions in get_locations, get_speeds or get_urls.
+    # We will catch any exceptions thrown here and clean up the job from
+    # the caller. Otherwise we end up trying to deal deleting a job from
+    # inside the Job constructor.
+    def get_locations(self, jobmonitor, jobid):
+        """Get the locations for the specified job.
+        """
+        jobmonitor.cursor.execute("select location from locations "
+                                  "where jobid=:jobid", {"jobid":jobid})
+        locationrows = jobmonitor.cursor.fetchall()
+        locations = [locationrow[0] for locationrow in locationrows]
+        return locations
+
+    def get_speeds(self, jobmonitor, jobid):
+        """Get the speeds for the specified job.
+        """
+        jobmonitor.cursor.execute("select speed from speeds where jobid=:jobid",
+                                  {"jobid":jobid})
+        speedrows = jobmonitor.cursor.fetchall()
+        speeds = [speedrow[0] for speedrow in speedrows]
+        return speeds
+
+    def get_urls(self, jobmonitor, jobid):
+        """Get the urls for the specified job.
+        """
+        jobmonitor.cursor.execute("select url from urls where jobid=:jobid",
+                                  {"jobid": jobid})
+        urlrows = jobmonitor.cursor.fetchall()
+        # convert to an array of urls rather than an array of tuples of urls
+        urls = [urlrow[0] for urlrow in urlrows]
+        return urls
+
 class JobMonitor(Daemon):
     def __init__(self, options, createdb=False):
 
@@ -102,14 +157,14 @@ class JobMonitor(Daemon):
 
         self.emaillogger = logging.getLogger("wpt.email")
         self.emaillogger.setLevel(logging.ERROR)
-        emailhandler = SMTPHandler(self.mail_host,
-                                   self.mail_username,
-                                   self.admin_toaddrs,
-                                   self.admin_subject,
-                                   credentials=(self.mail_username,
-                                                self.mail_password),
-                                   secure=())
-        self.emaillogger.addHandler(emailhandler)
+        self.emailhandler = SMTPHandler(self.mail_host,
+                                        self.mail_username,
+                                        self.admin_toaddrs,
+                                        self.admin_subject,
+                                        credentials=(self.mail_username,
+                                                     self.mail_password),
+                                        secure=())
+        self.emaillogger.addHandler(self.emailhandler)
 
         self.userlogger = logging.getLogger("user")
         self.userlogger.propagate = False
@@ -129,12 +184,14 @@ class JobMonitor(Daemon):
                 self.connection.execute("PRAGMA foreign_keys = ON;")
                 self.cursor = self.connection.cursor()
             except sqlite3.OperationalError:
-                self.emaillogger.exception("Could not get database connection " +
-                                           "to %s" % self.database)
+                self.notify_admin_logger("Failed to start").exception(
+                    "Could not get database connection " +
+                    "to %s" % self.database)
                 exit(2)
         elif not createdb:
-                self.emaillogger.error("database file %s does not exist" %
-                                       self.database)
+                self.notify_admin_logger("Failed to start").error(
+                    "database file %s does not exist" %
+                    self.database)
                 exit(2)
         else:
             try:
@@ -177,21 +234,105 @@ class JobMonitor(Daemon):
                                     )
                 self.connection.commit()
             except sqlite3.OperationalError:
-                self.emaillogger.exception("SQLError creating schema in " +
-                                           "database %s" % options.database)
+                self.notify_admin_logger("Failed to start").exception(
+                    "SQLError creating schema in " +
+                    "database %s" % options.database)
                 exit(2)
 
-    def notify_user(self, user, subject):
+    def set_job(self, jobid, email, build, label, runs, tcpdump,
+                 video, status, started, timestamp):
+        try:
+            self.job = Job(self, jobid, email, build, label, runs, tcpdump,
+                           video, status, started, timestamp)
+        except:
+            self.notify_admin_exception("Error setting job")
+            self.notify_user_exception(self.job.email,
+                                       "Error setting job")
+            self.purge_job(jobid)
+
+    def job_email_boilerplate(self, subject, message=None):
+        if not message:
+            message = ""
+        if not self.job:
+            job_message = ""
+        else:
+            job_message = """
+Job:       %(id)s
+Label:     %(label)s
+Build:     %(build)s
+Locations: %(locations)s
+Urls:      %(urls)s
+Speeds:    %(speeds)s
+Runs:      %(runs)s
+tcpdump:   %(tcpdump)s
+video:     %(video)s
+Status:    %(status)s
+""" % self.job.__dict__
+        job_message = "%s\n\n%s\n\n%s\n\n" % (subject, job_message, message)
+        return job_message
+
+    def notify_user_logger(self, user, subject):
         """Set the userlogger's handler to address and subject fields
         and return a reference to the userlogger object."""
+        if self.job:
+            subject = "[WebPagetest] Job %s Label %s %s" % (self.job.id,
+                                                            self.job.label,
+                                                            subject)
+        else:
+            subject = "[WebPagetest] %s" % subject
         self.userhandler.toaddrs = [user]
         self.userhandler.subject = subject
         return self.userlogger
+
+    def notify_admin_logger(self, subject):
+        """Set the emaillogger's handler subject field
+        and return a reference to the emaillogger object."""
+        if self.job:
+            subject = "[WebPagetest] Job %s Label %s %s" % (self.job.id,
+                                                            self.job.label,
+                                                            subject)
+        else:
+            subject = "[WebPagetest] %s" % subject
+        self.emailhandler.subject = subject
+        return self.emaillogger
+
+    def notify_user_info(self, user, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        self.notify_user_logger(user, subject).info(job_message)
+
+    def notify_user_exception(self, user, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        contact_message = ("Please contact your administrators %s for help." %
+                           self.admin_toaddrs)
+        job_message = "%s%s" % (job_message, contact_message)
+        self.notify_user_logger(user, subject).exception(job_message)
+
+    def notify_user_error(self, user, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        contact_message = ("Please contact your administrators %s for help." %
+                           self.admin_toaddrs)
+        job_message = "%s%s" % (job_message, contact_message)
+        self.notify_user_logger(user, subject).error(job_message)
+
+    def notify_admin_info(self, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        self.notify_admin_logger(subject).info(job_message)
+
+    def notify_admin_exception(self, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        self.notify_admin_logger(subject).exception(job_message)
+
+    def notify_admin_error(self, subject, message=None):
+        job_message = self.job_email_boilerplate(subject, message)
+        self.notify_admin_logger(subject).error(job_message)
 
     def purge_job(self, jobid):
         """Purge the job whose id is jobid along with all of the
         linked locations, speeds, and urls.
         """
+        if not jobid:
+            return
+
         jobparm = {"jobid": jobid}
         try:
             self.cursor.execute("delete from urls where jobid=:jobid",
@@ -204,9 +345,9 @@ class JobMonitor(Daemon):
                                 jobparm)
             self.connection.commit()
         except sqlite3.OperationalError:
-            self.emaillogger.exception("purge_job:: %s" % jobid)
+            self.notify_admin_exception("Exception purging job %s" % jobid)
         finally:
-            if jobid == jobid:
+            if self.job and self.job.id == jobid:
                 self.job = None
 
     def check_build(self, build):
@@ -237,7 +378,7 @@ class JobMonitor(Daemon):
                             break
             except:
                 # Which exceptions here? from httplib, BeautifulSoup
-                self.emaillogger.exception("Error checking build")
+                self.notify_admin_exception("Error checking build")
                 buildurl = None
 
         if buildurl:
@@ -255,7 +396,7 @@ class JobMonitor(Daemon):
                 "select * from jobs where status = 'pending' order by started")
             jobrow = self.cursor.fetchone()
         except sqlite3.OperationalError:
-            self.emaillogger.exception("Finding pending jobs.")
+            self.notify_admin_exception("Error finding pending jobs")
             raise
 
         if not jobrow:
@@ -263,8 +404,10 @@ class JobMonitor(Daemon):
 
         (jobid, email, build, label, runs, tcpdump, video, status, started,
          timestamp) = jobrow
+        self.set_job(jobid, email, build, label, runs, tcpdump, video,
+                     status, started, timestamp)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        status = "running"
+        self.job.status = status = "running"
         self.logger.debug("jobid: %s, email: %s, build: %s, label: %s, "
                           "runs; %s, tcpdump: %s, video: %s, status: %s, "
                           "started: %s, timestamp: %s" %
@@ -277,75 +420,43 @@ class JobMonitor(Daemon):
                 {"jobid": jobid, "build": build, "status": status,
                  "timestamp": timestamp})
             self.connection.commit()
+            self.notify_user_info(email, "job is running")
         except sqlite3.OperationalError:
-            self.emaillogger.exception("job %s for build %s, label %s failed "
-                                       "due to SQLErrors." %
-                                       (jobid, build, label))
-            self.notify_user(email,
-                             "Your webpagetest job failed").exception(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "SQLErrors. Please contact your administrators %s for help." %
-                (jobid, build, label, self.admin_toaddrs))
+            self.notify_admin_exception("Error updating running job")
+            self.notify_user_exception(email, "Error updating running job")
             self.purge_job(jobid)
             return
 
-        self.job = {
-            "id" : jobid,
-            "email": email,
-            "build": build,
-            "label": label,
-            "runs": runs,
-            "tcpdump": tcpdump,
-            "video": video,
-            "status": status,
-            "started": started,
-            "timestamp": timestamp
-            }
         if not self.download_build():
             self.purge_job(jobid)
             return
 
-        locations = self.get_locations()
-        speeds = self.get_speeds()
-        urls = self.get_urls()
+        for location in self.job.locations:
+            self.process_location(location)
 
-        for location in locations:
-            self.process_location(location, speeds, urls)
-
-        msg_subject = ("Your webpagetest job %s build %s, label %s completed."
-                       "\n\n" %
-                       (jobid, build, label))
-        msg_body = ("Results for job %s build %s, label %s are complete.\n\n" %
-                    (jobid, build, label))
-        self.notify_user(email, msg_subject).info(msg_body)
+        self.job.status = "completed"
+        self.notify_user_info(email, "job completed.")
         self.purge_job(jobid)
 
     def download_build(self):
         """Download a build to the webpagetest server and
         update the firefox.dat file.
         """
-        self.logger.debug("downloading build: %s" % self.job["build"])
+        self.logger.debug("downloading build: %s" % self.job.build)
 
         try:
             if os.path.exists(self.firefoxpath):
                 os.unlink(self.firefoxpath)
 
-            urllib.urlretrieve(self.job["build"], self.firefoxpath)
+            urllib.urlretrieve(self.job.build, self.firefoxpath)
             #fh = open(firefoxpath)
             #md5sum = md5.new()
             #md5sum.update(fh.read())
             #md5digest = md5sum.hexdigest()
             #fh.close()
         except IOError:
-            self.emaillogger.exception("IOError retrieving build: %s." %
-                                       self.job.__str__())
-            self.notify_user(self.job["email"],
-                             "Your webpagetest job failed").error(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "a download error. Please contact your administrators %s for "
-                "help." %
-                (self.job["id"], self.job["build"], self.job["label"],
-                 self.admin_toaddrs))
+            self.notify_admin_exception("Error downloading build")
+            self.notify_user_exception(self.job.email, "Error downloading build")
             return False
         try:
             builddat = open(self.firefoxdatpath, "w")
@@ -360,15 +471,9 @@ class JobMonitor(Daemon):
             builddat.write("update=1\n")
             builddat.close()
         except IOError:
-            self.emaillogger.exception("IOError writing firefox.dat: %s." %
-                                       self.job.__str__())
-            self.notify_user(self.job["email"],
-                             "Your webpagetest job failed").error(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "a download error. Please contact your administrators %s for "
-                "help." %
-                (self.job["id"], self.job["build"], self.job["label"],
-                 self.admin_toaddrs))
+            self.notify_admin_exception("Error writing firefox.dat")
+            self.notify_user_exception(self.job.email,
+                                       "job failed")
             return False
 
         # Get information about the build by extracting the installer
@@ -400,74 +505,7 @@ class JobMonitor(Daemon):
         time.sleep(120)
         return True
 
-    def get_locations(self):
-        """Get the locations for the current job.
-        """
-        try:
-            self.cursor.execute("select location from locations "
-                                "where jobid=:jobid", {"jobid":self.job["id"]})
-            locationrows = self.cursor.fetchall()
-            locations = [locationrow[0] for locationrow in locationrows]
-        except sqlite3.OperationalError:
-            self.emaillogger.exception("SQLError collecting locations: %s." %
-                                       self.job.__str__())
-            self.notify_user(self.job["email"],
-                             "Your webpagetest job failed").error(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "an SQLError getting locations. Please contact your "
-                "administrators %s for help." %
-                (self.job["id"], self.job["build"], self.job["label"],
-                 self.admin_toaddrs))
-            self.purge_job(self.job["id"])
-            locations = []
-        return locations
-
-    def get_speeds(self):
-        """Get the speeds for the current job.
-        """
-        try:
-            self.cursor.execute("select speed from speeds where jobid=:jobid",
-                                {"jobid":self.job["id"]})
-            speedrows = self.cursor.fetchall()
-            speeds = [speedrow[0] for speedrow in speedrows]
-        except sqlite3.OperationalError:
-            self.emaillogger.exception("SQLError: collecting speeds: %s." %
-                                       self.job.__str__())
-            self.notify_user(self.job["email"],
-                             "Your webpagetest job failed").error(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "an SQLError getting speeds. Please contact your "
-                "administrators %s for help." %
-                (self.job["id"], self.job["build"], self.job["label"],
-                 self.admin_toaddrs))
-            self.purge_job(self.job["id"])
-            speeds = []
-        return speeds
-
-    def get_urls(self):
-        """Get the urls for the current job.
-        """
-        try:
-            self.cursor.execute("select url from urls where jobid=:jobid",
-                                {"jobid": self.job["id"]})
-            urlrows = self.cursor.fetchall()
-            # convert to an array of urls rather than an array of tuples of urls
-            urls = [urlrow[0] for urlrow in urlrows]
-        except sqlite3.OperationalError:
-            self.emaillogger.exception("SQLError: collecting urls: %s." %
-                                       self.job.__str__())
-            self.notify_user(self.job["email"],
-                             "Your webpagetest job failed").error(
-                "Your webpagetest job %s for build %s, label %s failed due to "
-                "an SQLError getting urls. Please contact your "
-                "administrators %s for help." %
-                (self.job["id"], self.job["build"], self.job["label"],
-                 self.admin_toaddrs))
-            self.purge_job(self.job["id"])
-            urls = []
-        return urls
-
-    def process_location(self, location, speeds, urls):
+    def process_location(self, location):
         """Submit jobs for this location for each speed and url.
         """
         self.logger.debug("process_location: %s" % location)
@@ -488,7 +526,7 @@ class JobMonitor(Daemon):
         messages = ""
         test_url_map = {}
         test_speed_map = {}
-        for speed in speeds:
+        for speed in self.job.speeds:
             self.logger.debug("process_location: location: %s, speed: %s" %
                               (location, speed))
 
@@ -502,10 +540,10 @@ class JobMonitor(Daemon):
                 "priority": 6,
                 "video": 1,
                 "fvonly": 0,
-                "label": self.job["label"],
-                "runs": self.job["runs"],
-                "tcpdump": self.job["tcpdump"],
-                "video": self.job["video"],
+                "label": self.job.label,
+                "runs": self.job.runs,
+                "tcpdump": self.job.tcpdump,
+                "video": self.job.video,
                 "location": "%s.%s" % (location, speed),
                 "mv": 0,
                 "k": self.api_key,
@@ -516,16 +554,16 @@ class JobMonitor(Daemon):
                 "submitting batch: email: %s, build: %s, "
                 "label: %s, location: %s, speed: %s, urls: %s, "
                 "wpt_parameters: %s, server: %s"  % (
-                    self.job["email"], self.job["build"],
-                    self.job["label"], location, speed, urls,
+                    self.job.email, self.job.build,
+                    self.job.label, location, speed, self.job.urls,
                     wpt_parameters, self.server))
             partial_test_url_map = wpt_batch_lib.SubmitBatch(
-                urls,
+                self.job.urls,
                 wpt_parameters,
                 "http://%s/" % self.server)
             self.logger.debug("partial_test_url_map: %s" % partial_test_url_map)
             accepted_urls = partial_test_url_map.values()
-            for url in urls:
+            for url in self.job.urls:
                 if url not in accepted_urls:
                     messages += "url %s was not accepted\n" % url
             test_url_map.update(partial_test_url_map)
@@ -539,7 +577,7 @@ class JobMonitor(Daemon):
         # load each url 3 times (once to prime wpr, once for first load,
         # once for second load) times the number of runs times the time
         # limit for a test.
-        total_time_limit = (len(accepted_urls) * 3 * int(self.job["runs"]) *
+        total_time_limit = (len(accepted_urls) * 3 * int(self.job.runs) *
                             self.time_limit)
         terminate_time = (datetime.datetime.now() +
                           datetime.timedelta(seconds=total_time_limit))
@@ -558,8 +596,8 @@ class JobMonitor(Daemon):
             self.logger.debug(
                 "CheckBatchStatus: email: %s, build: %s, label: %s, "
                 "location: %s, speed: %s, urls: %s" % (
-                    self.job["email"], self.job["build"], self.job["label"],
-                    location, speed, urls))
+                    self.job.email, self.job.build, self.job.label,
+                    location, speed, self.job.urls))
             test_status_map = wpt_batch_lib.CheckBatchStatus(
                 pending_test_url_map.keys(),
                 server_url="http://%s/" % self.server)
@@ -604,16 +642,14 @@ class JobMonitor(Daemon):
                              test_msg_map, messages):
         """Process test results, notifying user of the results.
         """
+        build_name = ""
+        build_version = ""
+        build_revision = ""
+        build_id = ""
+        build_branch = ""
 
-        msg_subject = ("Your webpagetest job %s "
-                       "build %s, label %s for location %s, completed.\n\n" %
-                       (self.job["id"], self.job["build"], self.job["label"],
-                        location))
-        msg_body = ("Results for job %s build %s, label %s for "
-                    "location %s\n\n" % (self.job["id"],
-                                         self.job["build"],
-                                         self.job["label"],
-                                         location))
+        msg_subject = "Results for location %s." % location
+        msg_body = "Results for location %s\n\n" %  location
         msg_body_map = {}
         for test_id in test_url_map.keys():
             url = test_url_map[test_id]
@@ -621,36 +657,49 @@ class JobMonitor(Daemon):
             msg_body_key = url + speed
 
             try:
-                msg = test_msg_map[test_id]
+                msg = "Messages: %s\n\n" % test_msg_map[test_id]
             except KeyError:
-                msg = "None"
-            msg_body_map[msg_body_key] = ("Url: %s, Speed: %s, "
-                                          "Result: http://%s/result/%s/\n"
-                                          "Messages: %s\n\n" %
-                                          (url, speed, self.results_server,
-                                           test_id, msg))
+                msg = ""
+                msg_body_map[msg_body_key] = "\n".join([
+                    "Url: %s" % url,
+                    "Speed: %s" % speed,
+                    "Result: http://%s/result/%s/\n" % (self.results_server, test_id),
+                    "%s" % msg])
             result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
                                                                test_id)
             self.logger.debug("Getting result for test %s result_url %s" %
                               (test_id, result_url))
             result_response = urllib.urlopen(result_url)
             if result_response.getcode() != 200:
-                msg = ("Failed to retrieve results from Webpagetest for job %s "
-                       "for build %s, label %s failed." %
-                       (self.job["id"], self.job["build"], self.job["label"]))
+                msg = "Failed to retrieve results from Webpagetest"
                 msg_body_map[msg_body_key] += msg
-                self.emaillogger.exception(msg)
+                self.notify_admin_error(msg)
             else:
                 test_result = json.loads(result_response.read())
                 result_response = None
                 try:
-                    self.post_to_datazilla(test_result)
+                    datazilla_dataset = self.post_to_datazilla(test_result)[0]
+                    #msg_body_map[msg_body_key] += "\nJSON:\n" + json.dumps(datazilla_dataset,indent=4) + "\n\n"
+                    if not build_version:
+                        test_build_data = datazilla_dataset["test_build"]
+                        build_name = test_build_data["name"]
+                        build_version = test_build_data["version"]
+                        build_revision = test_build_data["revision"]
+                        build_id = test_build_data["id"]
+                        build_branch = test_build_data["branch"]
+                    wpt_data = datazilla_dataset["wpt_data"]
+                    for view in "firstView", "repeatView":
+                        view_data = wpt_data[view]
+                        msg_body_map[msg_body_key] += "  %s:\n" % view
+                        view_data_keys = view_data.keys()
+                        view_data_keys.sort()
+                        for data_key in view_data_keys:
+                            msg_body_map[msg_body_key] += "    %s: %s\n" % (data_key, view_data[data_key])
+                    msg_body_map[msg_body_key] += "\n"
                 except:
-                    msg = ("Failed to submit result to datazilla for job %s "
-                           "for build %s, label %s failed." %
-                           (self.job["id"], self.job["build"], self.job["label"]))
+                    msg = "Error processing test result into datazilla"
                     msg_body_map[msg_body_key] += msg
-                    self.emaillogger.exception(msg)
+                    self.notify_admin_exception(msg)
                 if self.admin_loglevel == logging.DEBUG:
                     import os.path
                     logdir = os.path.dirname(self.logfile)
@@ -662,6 +711,13 @@ class JobMonitor(Daemon):
                     result_json.close()
                 test_result = None
 
+        if build_name:
+            msg_body += "%s %s %s id: %s revision: %s\n\n" % (build_name,
+                                                              build_version,
+                                                              build_branch,
+                                                              build_id,
+                                                              build_revision)
+
         msg_body_keys = msg_body_map.keys()
         msg_body_keys.sort()
         if len(msg_body_keys) == 0:
@@ -670,8 +726,8 @@ class JobMonitor(Daemon):
             for msg_body_key in msg_body_keys:
                 msg_body += msg_body_map[msg_body_key]
         if messages:
-            msg_body += "\n\nMessages: %s\n" % messages
-        self.notify_user(self.job["email"], msg_subject).info(msg_body)
+            msg_body += "\n\n%s\n" % messages
+        self.notify_user_info(self.job.email, msg_subject, msg_body)
 
     def post_to_datazilla(self, test_result):
         """ take test_results (json) and upload them to datazilla """
@@ -684,9 +740,13 @@ class JobMonitor(Daemon):
             "repeatView": {}
         }
         wpt_data["label"] = test_result["data"]["label"]
-        if 'automatic' not in wpt_data["label"]:
+        submit_results = False
+        if 'automatic' in wpt_data["label"]:
             # Only submit automatic builds to Datazilla.
-            return
+            # Do not short circuit the function but collect
+            # additional data for use in emailing the user
+            # before returning.
+            submit_results = True
 
         wpt_data["connectivity"] = test_result["data"]["connectivity"]
         wpt_data["location"] = test_result["data"]["location"]
@@ -771,6 +831,8 @@ class JobMonitor(Daemon):
         datasets = request.datasets()
         for dataset in datasets:
             dataset["wpt_data"] = wpt_data
+            if not submit_results:
+                continue
             response = request.send(dataset)
             # print error responses
             if response.status != 200:
@@ -786,6 +848,7 @@ class JobMonitor(Daemon):
                 self.logger.debug("Datazilla response for %s %s %s is: %s" % (
                     wpt_data["url"], wpt_data["location"], wpt_data["connectivity"],
                     res.lower()))
+        return datasets
 
     def check_waiting_jobs(self):
         """Check waiting jobs that are older than check_minutes or
@@ -802,12 +865,15 @@ class JobMonitor(Daemon):
                 {"check_threshold": check_threshold})
             jobrows = self.cursor.fetchall()
         except sqlite3.OperationalError:
-            self.emaillogger.exception("SQLError: checking_waiting_jobs.")
+            self.notify_admin_exception("Error checking waiting jobs")
             raise
 
         for jobrow in jobrows:
             (jobid, email, build, label, runs, tcpdump, video, status, started,
              timestamp) = jobrow
+            self.set_job(jobid, email, build, label, runs, tcpdump,
+                         video, status, started, timestamp)
+
             self.logger.debug("checking_waiting_jobs: "
                               "jobid: %s, email: %s, build: %s, label: %s, "
                               "runs: %s, tcpdump: %s, video: %s, status: %s, "
@@ -818,20 +884,14 @@ class JobMonitor(Daemon):
             try:
                 buildurl = self.check_build(build)
             except:
-                self.emaillogger.exception("job %s for build %s, label %s "
-                                           "failed due to a build error." %
-                                           (jobid, build, label))
-                self.notify_user(email,
-                                 "Your webpagetest job failed").exception(
-                    "Your webpagetest job %s for build %s, label %s failed "
-                    "due to a build error. Please contact your "
-                    "administrators %s for help." %
-                    (jobid, build, label, self.admin_toaddrs))
+                self.notify_admin_exception("Build Error")
+                self.notify_user_exception(email,
+                                           "Build Error")
                 self.purge_job(jobid)
                 continue
 
             if buildurl:
-                status = "pending"
+                self.job.status = status = "pending"
                 build = buildurl
             try:
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -841,23 +901,12 @@ class JobMonitor(Daemon):
                                {"jobid": jobid, "build": build,
                                 "status": status, "timestamp": timestamp})
                 self.connection.commit()
+                self.notify_user_info(email,
+                                      "job is pending availability of the build.")
             except sqlite3.OperationalError:
-                self.emaillogger.exception("SQLError: checking_waiting_jobs: "
-                                           "updating job: "
-                                           "jobid: %s, email: %s, build: %s, "
-                                           "label: %s, "
-                                           "runs: %s, status: %s, "
-                                           "tcpdump: %s, video: %s, "
-                                           "started: %s, timestamp: %s" %
-                                           (jobid, email, build, label,
-                                            runs, tcpdump, video, status,
-                                            started, timestamp))
-                self.notify_user(email,
-                                 "Your webpagetest job failed").exception(
-                    "Your webpagetest job %s for build %s, label %s failed "
-                    "due to SQLErrors. Please contact your "
-                    "administrators %s for help." %
-                    (jobid, build, label, self.admin_toaddrs))
+                self.notify_admin_exception("Error updating job")
+                self.notify_user_exception(email,
+                                           "job failed")
                 self.purge_job(jobid)
 
     def check_running_jobs(self):
@@ -867,7 +916,7 @@ class JobMonitor(Daemon):
             self.cursor.execute("select * from jobs where status = 'running'")
             jobrows = self.cursor.fetchall()
         except sqlite3.OperationalError:
-            self.emaillogger.exception("Checking running job.")
+            self.notify_admin_exception("Error checking running jobs")
             raise
 
         if jobrows:
@@ -878,6 +927,8 @@ class JobMonitor(Daemon):
                 # send email to user then delete job
                 (jobid, email, build, label, runs, tcpdump, video, status,
                  started, timestamp) = jobrow
+                self.set_job(jobid, email, build, label, runs, tcpdump,
+                             video, status, started, timestamp)
                 self.purge_job(jobid)
 
 def main():
@@ -935,8 +986,9 @@ def main():
             jm.process_job()
             time.sleep(jm.sleep_time)
     except:
-        jm.emaillogger.exception("Terminating wptmonitor due to "
-                                   "unhandled exception: ")
+        jm.notify_admin_exception("Error in wptmonitor",
+                                  "Terminating wptmonitor due to " +
+                                  "unhandled exception: ")
         exit(2)
 
 if __name__ == "__main__":
