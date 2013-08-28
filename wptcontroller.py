@@ -29,6 +29,7 @@ def application(environ, start_response):
     runs = ""
     tcpdump = ""
     video = ""
+    datazilla = ""
     locations = []
     speeds = []
     urls = []
@@ -66,6 +67,7 @@ def application(environ, start_response):
             runs = d.get("runs", [""])[0]
             tcpdump = d.get("tcpdump", [""])[0]
             video = d.get("video", [""])[0]
+            datazilla = d.get("datazilla", [""])[0]
         except:
             d = parse_qs(request_body)
             email = d.get("email", [""])[0]
@@ -74,6 +76,7 @@ def application(environ, start_response):
             runs = d.get("runs", [""])[0]
             tcpdump = d.get("tcpdump", [""])[0]
             video = d.get("video", [""])[0]
+            datazilla = d.get("datazilla", [""])[0]
 
         locations = d.get("locations", [])
         speeds = d.get("speeds", [])
@@ -86,11 +89,12 @@ def application(environ, start_response):
         runs = escape(runs.strip())
         tcpdump = escape(tcpdump.strip())
         video = escape(video.strip())
+        datazilla = escape(datazilla.strip())
         locations = [escape(location.strip()) for location in locations]
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
 
-        jm.set_job(None, email, build, label, runs, tcpdump, video,
+        jm.set_job(None, email, build, label, runs, tcpdump, video, datazilla,
                    None, None, None)
         jm.job.locations = locations
         jm.job.speeds = speeds
@@ -99,9 +103,9 @@ def application(environ, start_response):
         try:
             jm.cursor.execute(
                 "insert into jobs(email, build, label, runs, tcpdump, video, "
-                "status, started) "
-                "values (?, ?, ?, ?, ?, ?, ?, ?)",
-                (email, build, label, runs, tcpdump, video, "waiting",
+                "datazilla, status, started) "
+                "values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (email, build, label, runs, tcpdump, video, datazilla, "waiting",
                  datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
             jm.connection.commit()
             jm.job.id = jobid = jm.cursor.lastrowid
@@ -170,9 +174,9 @@ def application(environ, start_response):
         currentteststable = "<table><caption>Current Tests</caption>"
 
     for jobrow in jobrows:
-        (jobid, email, build, label, runs, tcpdump, video, status, started,
-         timestamp) = jobrow
-        jm.set_job(jobid, email, build, label, runs, tcpdump, video,
+        (jobid, email, build, label, runs, tcpdump, video, datazilla, status,
+         started, timestamp) = jobrow
+        jm.set_job(jobid, email, build, label, runs, tcpdump, video, datazilla,
                    status, started, timestamp)
         try:
             jm.cursor.execute(
@@ -211,7 +215,7 @@ def application(environ, start_response):
             "<tr>" +
             "<th>job id</th><th>user email</th><th>build</th>" +
             "<th>label</th><th>runs</th><th>tcpdump</th>" +
-            "<th>video</th><th>status</th><th>started</th>" +
+            "<th>video</th><th>datazilla</th><th>status</th><th>started</th>" +
             "<th>timestamp</th>" +
             "<th>location</th>" +
             "<th>speed</th>" +
@@ -231,7 +235,7 @@ def application(environ, start_response):
                         ("<tr>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
@@ -324,6 +328,10 @@ if __name__ == "__main__":
         </p>
         <p>
           <label>video: <input type="checkbox" name="video" checked="checked">
+          </label>
+        </p>
+        <p>
+          <label>Submit to datazilla: <input type="checkbox" name="datazilla">
           </label>
         </p>
         <p>

@@ -100,6 +100,11 @@ class WptOptions(optparse.OptionParser):
                         help="Do not record video, default : False")
         defaults["no_video"] = False
 
+        self.add_option("--datazilla",
+                        action="store_true", dest="datazilla",
+                        help="Submit results to datazilla, default : False")
+        defaults["datazilla"] = False
+
         self.add_option("--label",
                         action="store", dest="label",
                         help="Label of the machine to test, default: user-test")
@@ -212,6 +217,7 @@ def postToWPTQueue(options):
                 'runs': options.runs,
                 'tcpdump': [''] if options.no_tcpdump else ['on'],
                 'video': [''] if options.no_video else ['on'],
+                'datazilla': ['on'] if options.datazilla else [''],
                 'locations': options.locations}
 
     print options
