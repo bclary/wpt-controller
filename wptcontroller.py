@@ -30,6 +30,7 @@ def application(environ, start_response):
     tcpdump = ""
     video = ""
     datazilla = ""
+    script = ""
     locations = []
     speeds = []
     urls = []
@@ -68,6 +69,7 @@ def application(environ, start_response):
             tcpdump = d.get("tcpdump", [""])[0]
             video = d.get("video", [""])[0]
             datazilla = d.get("datazilla", [""])[0]
+            script = d.get("script", [""])[0]
         except:
             d = parse_qs(request_body)
             email = d.get("email", [""])[0]
@@ -77,6 +79,7 @@ def application(environ, start_response):
             tcpdump = d.get("tcpdump", [""])[0]
             video = d.get("video", [""])[0]
             datazilla = d.get("datazilla", [""])[0]
+            script = d.get("script", [""])[0]
 
         locations = d.get("locations", [])
         speeds = d.get("speeds", [])
@@ -90,12 +93,13 @@ def application(environ, start_response):
         tcpdump = escape(tcpdump.strip())
         video = escape(video.strip())
         datazilla = escape(datazilla.strip())
+        script = escape(script.strip())
         locations = [escape(location.strip()) for location in locations]
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
 
         jm.set_job(None, email, build, label, runs, tcpdump, video, datazilla,
-                   None, None, None)
+                   script, None, None, None)
         jm.job.locations = locations
         jm.job.speeds = speeds
         jm.job.urls = urls
@@ -103,9 +107,10 @@ def application(environ, start_response):
         try:
             jm.cursor.execute(
                 "insert into jobs(email, build, label, runs, tcpdump, video, "
-                "datazilla, status, started) "
-                "values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (email, build, label, runs, tcpdump, video, datazilla, "waiting",
+                "datazilla, script, status, started) "
+                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (email, build, label, runs, tcpdump, video, datazilla, script,
+                 "waiting",
                  datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
             jm.connection.commit()
             jm.job.id = jobid = jm.cursor.lastrowid
@@ -174,10 +179,10 @@ def application(environ, start_response):
         currentteststable = "<table><caption>Current Tests</caption>"
 
     for jobrow in jobrows:
-        (jobid, email, build, label, runs, tcpdump, video, datazilla, status,
-         started, timestamp) = jobrow
+        (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+         status, started, timestamp) = jobrow
         jm.set_job(jobid, email, build, label, runs, tcpdump, video, datazilla,
-                   status, started, timestamp)
+                   script, status, started, timestamp)
         try:
             jm.cursor.execute(
                 "select * from locations where jobid=:jobid",
@@ -215,7 +220,7 @@ def application(environ, start_response):
             "<tr>" +
             "<th>job id</th><th>user email</th><th>build</th>" +
             "<th>label</th><th>runs</th><th>tcpdump</th>" +
-            "<th>video</th><th>datazilla</th><th>status</th><th>started</th>" +
+            "<th>video</th><th>datazilla</th><th>script</th><th>status</th><th>started</th>" +
             "<th>timestamp</th>" +
             "<th>location</th>" +
             "<th>speed</th>" +
@@ -235,7 +240,7 @@ def application(environ, start_response):
                         ("<tr>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
@@ -371,6 +376,10 @@ if __name__ == "__main__":
                        jm.default_locations])
     html += """
         </select>
+        <p>
+          <label for="script">Script:</label>
+        </p>
+        <textarea name="script" cols="80" rows="6"></textarea>
         <p>
           <input type="submit" value="Submit">
         </p>

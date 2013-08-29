@@ -32,7 +32,7 @@ from daemonize import Daemon
 
 class Job(object):
     def __init__(self, jobmonitor, jobid, email, build, label, runs, tcpdump,
-                 video, datazilla, status, started, timestamp):
+                 video, datazilla, script, status, started, timestamp):
         self.jm = jobmonitor
         self.id = jobid
         self.email = email
@@ -42,6 +42,7 @@ class Job(object):
         self.tcpdump = tcpdump
         self.video = video
         self.datazilla = datazilla
+        self.script = script
         if jobid:
             self.locations = self.get_locations(jobmonitor, jobid)
             self.speeds = self.get_speeds(jobmonitor, jobid)
@@ -208,6 +209,7 @@ class JobMonitor(Daemon):
                                     "tcpdump text, "
                                     "video text, "
                                     "datazilla text, "
+                                    "script text, "
                                     "status text, "
                                     "started text, "
                                     "timestamp text"
@@ -242,10 +244,10 @@ class JobMonitor(Daemon):
                 exit(2)
 
     def set_job(self, jobid, email, build, label, runs, tcpdump,
-                 video, datazilla, status, started, timestamp):
+                 video, datazilla, script, status, started, timestamp):
         try:
             self.job = Job(self, jobid, email, build, label, runs, tcpdump,
-                           video, datazilla, status, started, timestamp)
+                           video, datazilla, script, status, started, timestamp)
         except:
             self.notify_admin_exception("Error setting job")
             self.notify_user_exception(self.job.email,
@@ -269,6 +271,7 @@ Runs:      %(runs)s
 tcpdump:   %(tcpdump)s
 video:     %(video)s
 datazilla: %(datazilla)s
+script:    %(script)s
 Status:    %(status)s
 """ % self.job.__dict__
         job_message = "%s\n\n%s\n\n%s\n\n" % (subject, job_message, message)
@@ -405,18 +408,18 @@ Status:    %(status)s
         if not jobrow:
             return
 
-        (jobid, email, build, label, runs, tcpdump, video, datazilla, status,
-         started, timestamp) = jobrow
+        (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+         status, started, timestamp) = jobrow
         self.set_job(jobid, email, build, label, runs, tcpdump, video, datazilla,
-                     status, started, timestamp)
+                     script, status, started, timestamp)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         self.job.status = status = "running"
         self.logger.debug("jobid: %s, email: %s, build: %s, label: %s, "
                           "runs; %s, tcpdump: %s, video: %s, datazilla: %s, "
-                          "status: %s, started: %s, timestamp: %s" %
+                          "script: %s, status: %s, started: %s, timestamp: %s" %
                           (jobid, email, build, label,
-                           runs, tcpdump, video, datazilla, status, started,
-                           timestamp))
+                           runs, tcpdump, video, datazilla, script, status,
+                           started, timestamp))
         try:
             self.cursor.execute(
                 "update jobs set build=:build, status=:status, "
@@ -550,6 +553,7 @@ Status:    %(status)s
                 "video": self.job.video,
                 "location": "%s.%s" % (location, speed),
                 "mv": 0,
+                "script": self.job.script,
                 "k": self.api_key,
             }
 
@@ -873,17 +877,17 @@ Status:    %(status)s
             raise
 
         for jobrow in jobrows:
-            (jobid, email, build, label, runs, tcpdump, video, datazilla, status,
-             started, timestamp) = jobrow
+            (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+             status, started, timestamp) = jobrow
             self.set_job(jobid, email, build, label, runs, tcpdump,
-                         video, datazilla, status, started, timestamp)
+                         video, datazilla, script, status, started, timestamp)
 
             self.logger.debug("checking_waiting_jobs: "
                               "jobid: %s, email: %s, build: %s, label: %s, "
                               "runs: %s, tcpdump: %s, video: %s, datazilla: %s, "
-                              "status: %s, started: %s, timestamp: %s" %
+                              "script: %s, status: %s, started: %s, timestamp: %s" %
                               (jobid, email, build, label,
-                               runs, tcpdump, video, datazilla, status,
+                               runs, tcpdump, video, datazilla, script, status,
                                started, timestamp))
             try:
                 buildurl = self.check_build(build)
@@ -930,9 +934,9 @@ Status:    %(status)s
             for jobrow in jobrows:
                 # send email to user then delete job
                 (jobid, email, build, label, runs, tcpdump, video, datazilla,
-                 status, started, timestamp) = jobrow
+                 script, status, started, timestamp) = jobrow
                 self.set_job(jobid, email, build, label, runs, tcpdump,
-                             video, datazilla, status, started, timestamp)
+                             video, datazilla, script, status, started, timestamp)
                 self.purge_job(jobid)
 
 def main():
