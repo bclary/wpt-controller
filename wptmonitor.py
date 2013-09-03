@@ -23,8 +23,6 @@ from optparse import OptionParser
 from dzclient import DatazillaRequest, DatazillaResult
 
 import BeautifulSoup
-# TODO(bc) Replace wpt_batch_lib
-import wpt_batch_lib
 
 from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
@@ -542,7 +540,7 @@ Status:    %(status)s
             # location:browser.connectivity
 
             wpt_parameters = {
-                "f": "xml",
+                "f": "json",
                 "private": 0,
                 "priority": 6,
                 "video": 1,
@@ -557,7 +555,6 @@ Status:    %(status)s
                 "k": self.api_key,
             }
 
-            # TODO(bc) Replace wpt_batch_lib.SubmitBatch
             self.logger.debug(
                 "submitting batch: email: %s, build: %s, "
                 "label: %s, location: %s, speed: %s, urls: %s, "
@@ -565,10 +562,16 @@ Status:    %(status)s
                     self.job.email, self.job.build,
                     self.job.label, location, speed, self.job.urls,
                     wpt_parameters, self.server))
-            partial_test_url_map = wpt_batch_lib.SubmitBatch(
-                self.job.urls,
-                wpt_parameters,
-                "http://%s/" % self.server)
+            partial_test_url_map = {}
+            for url in self.job.urls:
+                wpt_parameters['url'] = url
+                request_url = 'http://%s/runtest.php?%s' % (self.server,
+                                                            urllib.urlencode(wpt_parameters))
+                response = urllib.urlopen(request_url)
+                if response.getcode() == 200:
+                    response_data = json.loads(response.read())
+                    if response_data['statusCode'] == 200:
+                        partial_test_url_map[response_data['data']['testId']] = url
             self.logger.debug("partial_test_url_map: %s" % partial_test_url_map)
             accepted_urls = partial_test_url_map.values()
             for url in self.job.urls:
@@ -599,41 +602,42 @@ Status:    %(status)s
                     add_msg(test_msg_map, test_id,
                             "abandoned due to time limit.")
                 continue
-
-            # TODO(bc) Replace wpt_batch_lib.CheckBatchStatus
             self.logger.debug(
                 "CheckBatchStatus: email: %s, build: %s, label: %s, "
                 "location: %s, speed: %s, urls: %s" % (
                     self.job.email, self.job.build, self.job.label,
                     location, speed, self.job.urls))
-            test_status_map = wpt_batch_lib.CheckBatchStatus(
-                pending_test_url_map.keys(),
-                server_url="http://%s/" % self.server)
-            self.logger.debug("CheckBatchStatus: %s" % test_status_map)
-            for test_id, test_status in test_status_map.iteritems():
-                test_status = int(test_status)
-                if test_status == 100:
-                    test_status_text = "started"
-                elif test_status == 101:
-                    test_status_text = "waiting"
-                elif test_status == 200:
-                    test_status_text = "complete"
-                    del pending_test_url_map[test_id]
-                elif test_status == 400 or test_status == 401:
-                    test_status_text = "not found"
-                    del pending_test_url_map[test_id]
-                    add_msg(test_msg_map, test_id, "not found")
-                elif test_status == 402:
-                    test_status_text = "cancelled"
-                    del pending_test_url_map[test_id]
-                    add_msg(test_msg_map, test_id, "cancelled")
-                else:
-                    test_status_text = "unexpected failure"
-                    del pending_test_url_map[test_id]
-                    add_msg(test_msg_map, test_id,
-                            "failed with unexpected status %s" % test_status)
-                self.logger.debug("processing test status %s %s %s" %
-                                  (test_id, test_status, test_status_text))
+            test_status_map = {}
+            for test_id in pending_test_url_map.keys():
+                request_url = 'http://%s/testStatus.php?f=json&test=%s' % (self.server,
+                                                                           test_id)
+                response = urllib.urlopen(request_url)
+                if response.getcode() == 200:
+                    response_data = json.loads(response.read())
+                    test_status = response_data['statusCode']
+                    test_status_map[test_id] = test_status
+                    if test_status == 100:
+                        test_status_text = "started"
+                    elif test_status == 101:
+                        test_status_text = "waiting"
+                    elif test_status == 200:
+                        test_status_text = "complete"
+                        del pending_test_url_map[test_id]
+                    elif test_status == 400 or test_status == 401:
+                        test_status_text = "not found"
+                        del pending_test_url_map[test_id]
+                        add_msg(test_msg_map, test_id, "not found")
+                    elif test_status == 402:
+                        test_status_text = "cancelled"
+                        del pending_test_url_map[test_id]
+                        add_msg(test_msg_map, test_id, "cancelled")
+                    else:
+                        test_status_text = "unexpected failure"
+                        del pending_test_url_map[test_id]
+                        add_msg(test_msg_map, test_id,
+                                "failed with unexpected status %s" % test_status)
+                    self.logger.debug("processing test status %s %s %s" %
+                                      (test_id, test_status, test_status_text))
 
             if pending_test_url_map:
                 self.logger.debug("Finished checking batch status, "
