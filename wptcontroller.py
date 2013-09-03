@@ -379,6 +379,10 @@ if __name__ == "__main__":
         <p>
           <label for="script">Script:</label>
         </p>
+        <p>
+          See <a href="https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting">Scripting
+          WebPagetest</a> for more information. Use \\t to embed a tab in the text input.
+        </p>
         <textarea name="script" cols="80" rows="6"></textarea>
         <p>
           <input type="submit" value="Submit">

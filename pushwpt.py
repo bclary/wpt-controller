@@ -110,6 +110,15 @@ class WptOptions(optparse.OptionParser):
                         help="Label of the machine to test, default: user-test")
         defaults["label"] = "user-test"
 
+        self.add_option("--script",
+                        action="store", dest="script",
+                        help="WebPagetest script to execute, default: None. "
+                        "Use \\t to embed tabs and \\n to embed newlines "
+                        "in the script. "
+                        "See https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting "
+                        "for more information on scripting WebPagetest.")
+        defaults["script"] = ""
+
         self.set_defaults(**defaults)
         usage = """
                   pushwpt.py ssh://hg.mozilla.org/try  <- will find username in ~/.hgrc and get revision from hg push
@@ -214,6 +223,7 @@ def postToWPTQueue(options):
                 'email': [options.username],
                 'build': [options.build],
                 'label': [options.label],
+                'script': [options.script],
                 'runs': options.runs,
                 'tcpdump': [''] if options.no_tcpdump else ['on'],
                 'video': [''] if options.no_video else ['on'],

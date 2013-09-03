@@ -40,7 +40,7 @@ class Job(object):
         self.tcpdump = tcpdump
         self.video = video
         self.datazilla = datazilla
-        self.script = script
+        self.script = script.replace('\\t', '\t').replace('\\n', '\n')
         if jobid:
             self.locations = self.get_locations(jobmonitor, jobid)
             self.speeds = self.get_speeds(jobmonitor, jobid)
@@ -564,7 +564,11 @@ Status:    %(status)s
                     wpt_parameters, self.server))
             partial_test_url_map = {}
             for url in self.job.urls:
-                wpt_parameters['url'] = url
+                if self.job.script:
+                    wpt_parameters['script'] = '%s\nnavigate\t%s\n' % (self.job.script, url)
+
+                else:
+                    wpt_parameters['url'] = url
                 request_url = 'http://%s/runtest.php?%s' % (self.server,
                                                             urllib.urlencode(wpt_parameters))
                 response = urllib.urlopen(request_url)
