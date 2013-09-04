@@ -98,69 +98,10 @@ def application(environ, start_response):
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
 
-        jm.set_job(None, email, build, label, runs, tcpdump, video, datazilla,
-                   script, None, None, None)
-        jm.job.locations = locations
-        jm.job.speeds = speeds
-        jm.job.urls = urls
+        jm.create_job(email, build, label, runs, tcpdump,
+                      video, datazilla, script,
+                      locations, speeds, urls)
 
-        try:
-            jm.cursor.execute(
-                "insert into jobs(email, build, label, runs, tcpdump, video, "
-                "datazilla, script, status, started) "
-                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (email, build, label, runs, tcpdump, video, datazilla, script,
-                 "waiting",
-                 datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
-            jm.connection.commit()
-            jm.job.id = jobid = jm.cursor.lastrowid
-        except sqlite3.OperationalError:
-            jm.notify_admin_exception("Error inserting job")
-            jm.notify_user_exception(email, "Error inserting job")
-            raise
-
-        for location in locations:
-            try:
-                jm.cursor.execute(
-                    "insert into locations(location, jobid) "
-                    "values (?, ?)",
-                    (location, jobid))
-                jm.connection.commit()
-            except sqlite3.OperationalError:
-                jm.notify_admin_exception("Error inserting location")
-                jm.notify_user_exception(email, "Error inserting location")
-                jm.purge_job(jobid)
-                raise
-
-        for speed in speeds:
-            try:
-                jm.cursor.execute(
-                    "insert into speeds(speed, jobid) values (?, ?)",
-                    (speed, jobid))
-                jm.connection.commit()
-            except sqlite3.OperationalError:
-                msg = ("SQLError inserting speed: email: %s, build: %s, "
-                       "label: %s, location: %s" % (email, build, label, speed))
-                jm.notify_admin_exception("Error inserting speed")
-                jm.notify_user_exception(email, "Error inserting speed")
-                jm.purge_job(jobid)
-                raise
-
-        for url in urls:
-            try:
-                jm.cursor.execute(
-                    "insert into urls(url, jobid) values (?, ?)",
-                    (url, jobid))
-                jm.connection.commit()
-            except sqlite3.OperationalError:
-                msg = ("SQLError inserting url: email: %s, build: %s, "
-                       "label: %s, url: %s" % (email, build, label, url))
-                jm.notify_admin_exception("Error inserting url")
-                jm.notify_user_exception(email, "Error inserting url")
-                jm.purge_job(jobid)
-                raise
-
-        jm.notify_user_info(email, "job submitted")
         status = "302 Found"
         response_headers = [("Location", "/wpt-controller")]
         start_response(status, response_headers)

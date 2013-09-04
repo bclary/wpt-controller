@@ -365,7 +365,8 @@ sudo pip install BeautifulSoup
 #### wpt-controller Configuration
 
 The wpt-controller is configured via the settings.ini file. It
-consists of 4 sections: server, mail, admin, defaults.  Copy the
+consists of 4 required sections: server, mail, admin, defaults and
+optional sections for automatically submitted jobs.  Copy the
 wpt-controller settings.ini.example file to settings.ini and customize
 the settings according to your needs:
 
@@ -390,6 +391,28 @@ the settings according to your needs:
 addresses to be sent error messages.
 * admin_subject - email subject for administrator email messages.
 * admin_loglevel - default loglevel for file based logs.
+
+##### automatic (optional)
+
+* jobs - comma delimited list of automatic job names which will be
+submitted daily. These job names are also the names of additional
+sections in the ini file which describe the job to be submitted.
+
+##### <job name> (optional, but required if listed in automatic section)
+
+* email - email address of person to receive user notification emails regarding the job.
+* label - label to be used for the job.
+* build - url for the build or build directory where the build can be downloaded.
+* urls - comma delimited list of urls to be tested in the job.
+* locations - comma delimited list of locations to be tested in the job. Note these locations
+consist of the <machine-name>:<browser>, e.g. bc-win61i32-bldw:Firefox.
+* speeds - comma delimited list of speeds to be tested.
+* runs - integer number of runs each url should be tested.
+* tcpdump - on to collect a tcpdump of the test.
+* video - on to collect a video of the test.
+* datazilla - on to submit the results to datazilla.
+* script - string containing a WebPagetest script.
+* hour - hour of the day to submit the job.
 
 ##### defaults
 

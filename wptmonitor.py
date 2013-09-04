@@ -178,6 +178,34 @@ class JobMonitor(Daemon):
                                    secure=())
         self.userlogger.addHandler(self.userhandler)
 
+        self.automatic_jobs = []
+        job_names = []
+        try:
+            job_names = config.get("automatic", "jobs").split(",")
+        except ConfigParser.Error:
+            pass
+        for job_name in job_names:
+            automatic_job = {}
+            self.automatic_jobs.append(automatic_job)
+            automatic_job["email"] = config.get(job_name, "email")
+            automatic_job["label"] = config.get(job_name, "label")
+            automatic_job["build"] = config.get(job_name, "build")
+            automatic_job["urls"] = config.get(job_name, "urls").split(",")
+            automatic_job["locations"] = config.get(job_name, "locations").split(",")
+            automatic_job["speeds"] = config.get(job_name, "speeds").split(",")
+            automatic_job["runs"] = config.get(job_name, "runs")
+            automatic_job["tcpdump"] = config.get(job_name, "tcpdump")
+            automatic_job["video"] = config.get(job_name, "video")
+            automatic_job["datazilla"] = config.get(job_name, "datazilla")
+            automatic_job["script"] = config.get(job_name, "script")
+            automatic_job["hour"] = config.getint(job_name, "hour")
+            # If the current hour before the scheduled hour for
+            # the job, force its submission today. Otherwise, wait until
+            # tomorrow to submit the job.
+            automatic_job["datetime"] = datetime.datetime.now()
+            if automatic_job["datetime"].hour <= automatic_job["hour"]:
+                automatic_job["datetime"] -= datetime.timedelta(days=1)
+
         if os.path.exists(self.database):
             try:
                 self.connection = sqlite3.connect(self.database)
@@ -251,6 +279,71 @@ class JobMonitor(Daemon):
             self.notify_user_exception(self.job.email,
                                        "Error setting job")
             self.purge_job(jobid)
+
+    def create_job(self, email, build, label, runs, tcpdump,
+                   video, datazilla, script,
+                   locations, speeds, urls):
+        self.set_job(None, email, build, label, runs, tcpdump, video, datazilla,
+                     script, None, None, None)
+        self.job.locations = locations
+        self.job.speeds = speeds
+        self.job.urls = urls
+
+        try:
+            self.cursor.execute(
+                "insert into jobs(email, build, label, runs, tcpdump, video, "
+                "datazilla, script, status, started) "
+                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (email, build, label, runs, tcpdump, video, datazilla, script,
+                 "waiting",
+                 datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
+            self.connection.commit()
+            self.job.id = jobid = self.cursor.lastrowid
+        except sqlite3.OperationalError:
+            self.notify_admin_exception("Error inserting job")
+            self.notify_user_exception(email, "Error inserting job")
+            raise
+
+        for location in locations:
+            try:
+                self.cursor.execute(
+                    "insert into locations(location, jobid) "
+                    "values (?, ?)",
+                    (location, jobid))
+                self.connection.commit()
+            except sqlite3.OperationalError:
+                self.notify_admin_exception("Error inserting location")
+                self.notify_user_exception(email, "Error inserting location")
+                self.purge_job(jobid)
+                raise
+
+        for speed in speeds:
+            try:
+                self.cursor.execute(
+                    "insert into speeds(speed, jobid) values (?, ?)",
+                    (speed, jobid))
+                self.connection.commit()
+            except sqlite3.OperationalError:
+                msg = ("SQLError inserting speed: email: %s, build: %s, "
+                       "label: %s, location: %s" % (email, build, label, speed))
+                self.notify_admin_exception("Error inserting speed")
+                self.notify_user_exception(email, "Error inserting speed")
+                self.purge_job(jobid)
+                raise
+
+        for url in urls:
+            try:
+                self.cursor.execute(
+                    "insert into urls(url, jobid) values (?, ?)",
+                    (url, jobid))
+                self.connection.commit()
+            except sqlite3.OperationalError:
+                self.notify_admin_exception("Error inserting url")
+                self.notify_user_exception(email, "Error inserting url")
+                self.purge_job(jobid)
+                raise
+
+        self.notify_user_info(email, "job submitted")
 
     def job_email_boilerplate(self, subject, message=None):
         if not message:
@@ -379,7 +472,6 @@ Status:    %(status)s
                         match = re_builds.match(build_link.get("href"))
                         if match:
                             buildurl = "%s%s" % (build, build_link.get("href"))
-                            break
             except:
                 # Which exceptions here? from httplib, BeautifulSoup
                 self.notify_admin_exception("Error checking build")
@@ -645,8 +737,8 @@ Status:    %(status)s
 
             if pending_test_url_map:
                 self.logger.debug("Finished checking batch status, "
-                                  "sleeping 60 seconds...")
-                time.sleep(60)
+                                  "sleeping %d seconds..." % self.sleep_time)
+                time.sleep(self.sleep_time)
 
         if messages:
             messages = "\n" + messages
@@ -676,11 +768,11 @@ Status:    %(status)s
                 msg = "Messages: %s\n\n" % test_msg_map[test_id]
             except KeyError:
                 msg = ""
-                msg_body_map[msg_body_key] = "\n".join([
-                    "Url: %s" % url,
-                    "Speed: %s" % speed,
-                    "Result: http://%s/result/%s/\n" % (self.results_server, test_id),
-                    "%s" % msg])
+            msg_body_map[msg_body_key] = "\n".join([
+                "Url: %s" % url,
+                "Speed: %s" % speed,
+                "Result: http://%s/result/%s/\n" % (self.results_server, test_id),
+                "%s" % msg])
             result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
                                                                test_id)
             self.logger.debug("Getting result for test %s result_url %s" %
@@ -692,30 +784,29 @@ Status:    %(status)s
                 self.notify_admin_error(msg)
             else:
                 test_result = json.loads(result_response.read())
-                result_response = None
-                try:
-                    datazilla_dataset = self.post_to_datazilla(test_result)[0]
-                    #msg_body_map[msg_body_key] += "\nJSON:\n" + json.dumps(datazilla_dataset,indent=4) + "\n\n"
-                    if not build_version:
-                        test_build_data = datazilla_dataset["test_build"]
-                        build_name = test_build_data["name"]
-                        build_version = test_build_data["version"]
-                        build_revision = test_build_data["revision"]
-                        build_id = test_build_data["id"]
-                        build_branch = test_build_data["branch"]
-                    wpt_data = datazilla_dataset["wpt_data"]
-                    for view in "firstView", "repeatView":
-                        view_data = wpt_data[view]
-                        msg_body_map[msg_body_key] += "  %s:\n" % view
-                        view_data_keys = view_data.keys()
-                        view_data_keys.sort()
-                        for data_key in view_data_keys:
-                            msg_body_map[msg_body_key] += "    %s: %s\n" % (data_key, view_data[data_key])
-                    msg_body_map[msg_body_key] += "\n"
-                except:
-                    msg = "Error processing test result into datazilla"
-                    msg_body_map[msg_body_key] += msg
-                    self.notify_admin_exception(msg)
+                if test_result["statusCode"] == 200:
+                    try:
+                        datazilla_dataset = self.post_to_datazilla(test_result)[0]
+                        if not build_version:
+                            test_build_data = datazilla_dataset["test_build"]
+                            build_name = test_build_data["name"]
+                            build_version = test_build_data["version"]
+                            build_revision = test_build_data["revision"]
+                            build_id = test_build_data["id"]
+                            build_branch = test_build_data["branch"]
+                        wpt_data = datazilla_dataset["wpt_data"]
+                        for view in "firstView", "repeatView":
+                            view_data = wpt_data[view]
+                            msg_body_map[msg_body_key] += "  %s:\n" % view
+                            view_data_keys = view_data.keys()
+                            view_data_keys.sort()
+                            for data_key in view_data_keys:
+                                msg_body_map[msg_body_key] += "    %s: %s\n" % (data_key, view_data[data_key])
+                        msg_body_map[msg_body_key] += "\n"
+                    except:
+                        msg = "Error processing test result into datazilla"
+                        msg_body_map[msg_body_key] += msg
+                        self.notify_admin_exception(msg)
                 if self.admin_loglevel == logging.DEBUG:
                     import os.path
                     logdir = os.path.dirname(self.logfile)
@@ -947,6 +1038,29 @@ Status:    %(status)s
                              video, datazilla, script, status, started, timestamp)
                 self.purge_job(jobid)
 
+    def check_automatic_jobs(self):
+        """If the current datetime is a calendar day later than the last
+        time the automatic job was submitted and if the current hour
+        is later than the automatic job's scheduled hour, submit the job."""
+        now = datetime.datetime.now()
+        for aj in self.automatic_jobs:
+            aj_datetime = aj["datetime"]
+            aj_hour = aj["hour"]
+            if (now > aj_datetime and now.day != aj_datetime.day and
+                now.hour >= aj_hour):
+                self.create_job(aj["email"],
+                                aj["build"],
+                                aj["label"],
+                                aj["runs"],
+                                aj["tcpdump"],
+                                aj["video"],
+                                aj["datazilla"],
+                                aj["script"],
+                                aj["locations"],
+                                aj["speeds"],
+                                aj["urls"])
+                aj["datetime"] = now
+
 def main():
 
     parser = OptionParser()
@@ -997,6 +1111,7 @@ def main():
 
     try:
         while True:
+            jm.check_automatic_jobs()
             jm.check_waiting_jobs()
             jm.check_running_jobs()
             jm.process_job()

@@ -26,3 +26,20 @@ oauth_consumer_secret = <guid>
 [defaults]
 locations = wpt-win60w:Firefox, wpt-win60w:IE, wpt-win60w:Chrome
 urls = http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/,http://www.amazon.com,http://baidu.com,http://yahoo.co.jp
+
+[automatic]
+jobs=job_nightly
+
+[job_nightly]
+email=wpt@example.com
+label=Nightly
+build=http://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/latest-mozilla-central/
+urls=http://cnn.com/,http://www.yahoo.com/,http://www.mozilla.org/,https://facebook.com/,https://gmail.com/,http://pinterest.com/all/
+locations=bc-win61i32-bldw:Firefox
+speeds=Broadband,ModernMobile,ClassicMobile
+runs=3
+tcpdump=on
+video=on
+datazilla=on
+script=
+hour=8
