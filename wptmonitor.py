@@ -289,6 +289,14 @@ class JobMonitor(Daemon):
         self.job.speeds = speeds
         self.job.urls = urls
 
+        # If the build is a simple hexadecimal string, convert it into
+        # a url for the equivalent try build for the given email.
+        reHex = re.compile(r'[a-zA-Z0-9]*$')
+        if reHex.match(build):
+            self.job.build = build = "http://ftp.mozilla.org/pub/mozilla.org/"\
+                             "firefox/try-builds/%s-%s/try-win32/" % (email,
+                                                                      build)
+
         try:
             self.cursor.execute(
                 "insert into jobs(email, build, label, runs, tcpdump, video, "
