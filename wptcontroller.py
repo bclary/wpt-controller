@@ -62,28 +62,23 @@ def application(environ, start_response):
         request_body = environ["wsgi.input"].read(request_body_size)
         try:
             d = json.loads(request_body)
-            email = d.get("email", [""])[0]
-            build = d.get("build", [""])[0]
-            label = d.get("label", [""])[0]
-            runs = d.get("runs", [""])[0]
-            tcpdump = d.get("tcpdump", [""])[0]
-            video = d.get("video", [""])[0]
-            datazilla = d.get("datazilla", [""])[0]
-            script = d.get("script", [""])[0]
         except:
             d = parse_qs(request_body)
-            email = d.get("email", [""])[0]
-            build = d.get("build", [""])[0]
-            label = d.get("label", [""])[0]
-            runs = d.get("runs", [""])[0]
-            tcpdump = d.get("tcpdump", [""])[0]
-            video = d.get("video", [""])[0]
-            datazilla = d.get("datazilla", [""])[0]
-            script = d.get("script", [""])[0]
 
+        email = d.get("email", [""])[0]
+        build = d.get("build", [""])[0]
+        label = d.get("label", [""])[0]
+        runs = d.get("runs", [""])[0]
+        tcpdump = d.get("tcpdump", [""])[0]
+        video = d.get("video", [""])[0]
+        datazilla = d.get("datazilla", [""])[0]
+        url = d.get("url", [""])[0]
+        script = d.get("script", [""])[0]
         locations = d.get("locations", [])
         speeds = d.get("speeds", [])
         urls = d.get("urls", [])
+        if url:
+            urls.append(url)
 
         # Always escape user input to avoid script injection
         email = escape(email.strip())
@@ -300,7 +295,11 @@ if __name__ == "__main__":
           <option value="Dial">56K Dial-Up (49/30 Kbps 120ms RTT)</option>
         </select>
         <p>
-          <label for="urls">URLS:</label>
+          <label for="url">Custom Url:</label>
+        </p>
+        <input id="urls" name="urls" type="text" size="80">
+        <p>
+          <label for="urls">Recorded Urls:</label>
         </p>"""
     html += ("<select id='urls' name='urls' size='" +
              str(len(jm.default_urls)) + "' multiple>" +
