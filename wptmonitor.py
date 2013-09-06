@@ -449,7 +449,7 @@ Status:    %(status)s
             self.cursor.execute("delete from jobs where id=:jobid",
                                 jobparm)
             self.connection.commit()
-        except sqlite3.OperationalError:
+        except:
             self.notify_admin_exception("Exception purging job %s" % jobid)
         finally:
             if self.job and self.job.id == jobid:

@@ -77,6 +77,7 @@ def application(environ, start_response):
         locations = d.get("locations", [])
         speeds = d.get("speeds", [])
         urls = d.get("urls", [])
+        canceljobs = d.get("canceljobs", [])
         if url:
             urls.append(url)
 
@@ -92,10 +93,15 @@ def application(environ, start_response):
         locations = [escape(location.strip()) for location in locations]
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
+        canceljobs = [escape(canceljob.strip()) for canceljob in canceljobs]
 
-        jm.create_job(email, build, label, runs, tcpdump,
-                      video, datazilla, script,
-                      locations, speeds, urls)
+        for canceljob in canceljobs:
+            jm.purge_job(int(canceljob))
+
+        if email and build and runs and locations and speeds and urls:
+            jm.create_job(email, build, label, runs, tcpdump,
+                          video, datazilla, script,
+                          locations, speeds, urls)
 
         status = "302 Found"
         response_headers = [("Location", "/wpt-controller")]
@@ -112,7 +118,18 @@ def application(environ, start_response):
         raise
 
     if jobrows:
-        currentteststable = "<table><caption>Current Tests</caption>"
+        currentteststable = (
+            "<table><caption>Current Tests</caption>" +
+            "<tr>" +
+            "<th>cancel</th>" +
+            "<th>job id</th><th>user email</th><th>build</th>" +
+            "<th>label</th><th>runs</th><th>tcpdump</th>" +
+            "<th>video</th><th>datazilla</th><th>script</th><th>status</th><th>started</th>" +
+            "<th>timestamp</th>" +
+            "<th>location</th>" +
+            "<th>speed</th>" +
+            "<th>url</th>" +
+            "</tr>")
 
     for jobrow in jobrows:
         (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
@@ -152,21 +169,11 @@ def application(environ, start_response):
                                       jobid)
             raise
 
-        currentteststable += (
-            "<tr>" +
-            "<th>job id</th><th>user email</th><th>build</th>" +
-            "<th>label</th><th>runs</th><th>tcpdump</th>" +
-            "<th>video</th><th>datazilla</th><th>script</th><th>status</th><th>started</th>" +
-            "<th>timestamp</th>" +
-            "<th>location</th>" +
-            "<th>speed</th>" +
-            "<th>url</th>" +
-            "</tr>")
-
+        showcanceljob = False if status == 'running' else True
         for locationrow in locationrows:
             for speedrow in speedrows:
                 for urlrow in urlrows:
-                    args = []
+                    args = [jobrow[0]]
                     args.extend(jobrow)
                     args.append(locationrow[1])
                     args.append(speedrow[1])
@@ -174,6 +181,8 @@ def application(environ, start_response):
 
                     currentteststable += (
                         ("<tr>" +
+                         ("<td><input name='canceljobs' value='%s' type='checkbox'></td>"
+                          if showcanceljob else "<td>&nbsp;<!-- %s --></td>") +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
@@ -182,6 +191,7 @@ def application(environ, start_response):
                          "<td>%s</td>" +
                          "<td>%s</td>" +
                          "</tr>") % tuple(args))
+                    showcanceljob = False
 
     if jobrows:
         currentteststable += "</table>"
@@ -324,11 +334,11 @@ if __name__ == "__main__":
           WebPagetest</a> for more information. Use \\t to embed a tab in the text input.
         </p>
         <textarea name="script" cols="80" rows="6"></textarea>
+        %s
         <p>
           <input type="submit" value="Submit">
         </p>
         </form>
-        %s
     </div>
   </body>
 </html>
