@@ -881,6 +881,10 @@ Status:    %(status)s
         for wpt_key in wpt_metric_keys:
             for view in "firstView", "repeatView":
                 wpt_data[view][wpt_key] = []
+        for view in "firstView", "repeatView":
+            wpt_data[view]['load_arithmetic_mean'] = []
+            wpt_data[view]['load_geometric_mean'] = []
+            wpt_data[view]['load_quadratic_mean'] = []
 
         if len(runs) == 1:
             raise Exception("post_to_datazilla: no runs")
@@ -889,6 +893,27 @@ Status:    %(status)s
         platform = "x86"
         reUserAgent = re.compile('User-Agent: Mozilla/5.0 \(Windows NT ([^;]*);.*')
         for run in runs:
+            for view in "firstView", "repeatView":
+                if not run[view]:
+                    continue
+                load_arithmetic_mean = 0.0
+                load_geometric_mean = 1.0
+                load_quadratic_mean = 0.0
+                requests = run[view]["requests"]
+                nrequests = len(requests)
+                for request in requests:
+                    load_arithmetic_mean += float(request["load_ms"])
+                    load_geometric_mean *= pow(float(request["load_ms"]), 1.0/nrequests)
+                    load_quadratic_mean += pow(float(request["load_ms"]), 2.0)
+                if nrequests > 0:
+                    load_arithmetic_mean /= nrequests
+                    load_quadratic_mean = pow(load_quadratic_mean/nrequests, 0.5)
+                load_arithmetic_mean = int(round(load_arithmetic_mean))
+                load_geometric_mean = int(round(load_geometric_mean))
+                load_quadratic_mean = int(round(load_quadratic_mean))
+                wpt_data[view]['load_arithmetic_mean'].append(load_arithmetic_mean)
+                wpt_data[view]['load_geometric_mean'].append(load_geometric_mean)
+                wpt_data[view]['load_quadratic_mean'].append(load_quadratic_mean)
             for wpt_key in wpt_metric_keys:
                 for view in "firstView", "repeatView":
                     if not run[view]:
