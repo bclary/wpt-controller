@@ -1,0 +1,13 @@
+diff --git a/agent/wptdriver/wpt_driver_core.cc b/agent/wptdriver/wpt_driver_core.cc
+index d97dbb6..d0aeb23 100644
+--- a/agent/wptdriver/wpt_driver_core.cc
++++ b/agent/wptdriver/wpt_driver_core.cc
+@@ -238,6 +238,8 @@ bool WptDriverCore::BrowserTest(WptTestDriver& test, WebBrowser &browser) {
+     if (test._tcpdump)
+       _winpcap.StartCapture( test._file_base + _T(".cap") );
+ 
++    SetEnvironmentVariable(_T("SSLKEYLOGFILE"),
++                              test._file_base + _T("_sslkeylogfile.txt"));
+     SetCursorPos(0,0);
+     ShowCursor(FALSE);
+     ret = browser.RunAndWait(critical_error);

@@ -767,6 +767,7 @@ Status:    %(status)s
         msg_subject = "Results for location %s." % location
         msg_body = "Results for location %s\n\n" %  location
         msg_body_map = {}
+        runs = int(self.job.runs)
         for test_id in test_url_map.keys():
             url = test_url_map[test_id]
             speed = test_speed_map[test_id]
@@ -776,11 +777,24 @@ Status:    %(status)s
                 msg = "Messages: %s\n\n" % test_msg_map[test_id]
             except KeyError:
                 msg = ""
-            msg_body_map[msg_body_key] = "\n".join([
+            msg_body_list = [
                 "Url: %s" % url,
                 "Speed: %s" % speed,
-                "Result: http://%s/result/%s/\n" % (self.results_server, test_id),
-                "%s" % msg])
+                "Result: http://%s/result/%s/\n" % (self.results_server, test_id)]
+            for irun in range(1, runs+1):
+                msg_body_list.append("    Run: %d" % irun)
+                msg_body_list.append("        firstView")
+                msg_body_list.append("            tcpdump  : http://%s/result/%s/%s.cap" %
+                                     (self.results_server, test_id, irun))
+                msg_body_list.append("            sslkeylog: http://%s/getgzip.php?test=%s&file=%d_sslkeylogfile.txt" %
+                                     (self.results_server, test_id, irun))
+                msg_body_list.append("        repeatView")
+                msg_body_list.append("            tcpdump  : http://%s/result/%s/%s.cap" %
+                                     (self.results_server, test_id, irun))
+                msg_body_list.append("            sslkeylog: http://%s/getgzip.php?test=%s&file=%d_sslkeylogfile.txt" %
+                                     (self.results_server, test_id, irun))
+            msg_body_list.append("%s" % msg)
+            msg_body_map[msg_body_key] = "\n".join(msg_body_list)
             result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
                                                                test_id)
             self.logger.debug("Getting result for test %s result_url %s" %
@@ -902,9 +916,10 @@ Status:    %(status)s
                 requests = run[view]["requests"]
                 nrequests = len(requests)
                 for request in requests:
-                    load_arithmetic_mean += float(request["load_ms"])
-                    load_geometric_mean *= pow(float(request["load_ms"]), 1.0/nrequests)
-                    load_quadratic_mean += pow(float(request["load_ms"]), 2.0)
+                    load_ms = abs(float(request["load_ms"]))
+                    load_arithmetic_mean += load_ms
+                    load_geometric_mean *= pow(load_ms, 1.0/nrequests)
+                    load_quadratic_mean += pow(load_ms, 2.0)
                 if nrequests > 0:
                     load_arithmetic_mean /= nrequests
                     load_quadratic_mean = pow(load_quadratic_mean/nrequests, 0.5)
