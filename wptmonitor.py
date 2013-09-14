@@ -10,6 +10,7 @@ import json
 import logging
 #import md5
 import os
+import os.path
 import random
 import re
 import shutil
@@ -30,7 +31,8 @@ from daemonize import Daemon
 
 class Job(object):
     def __init__(self, jobmonitor, jobid, email, build, label, runs, tcpdump,
-                 video, datazilla, script, status, started, timestamp):
+                 video, datazilla, prescript, postscript, status, started,
+                 timestamp):
         self.jm = jobmonitor
         self.id = jobid
         self.email = email
@@ -40,15 +42,16 @@ class Job(object):
         self.tcpdump = tcpdump
         self.video = video
         self.datazilla = datazilla
-        self.script = script.replace('\\t', '\t').replace('\\n', '\n')
+        self.prescript = prescript.replace('\\t', '\t').replace('\\n', '\n')
+        self.postscript = postscript.replace('\\t', '\t').replace('\\n', '\n')
         if jobid:
             self.locations = self.get_locations(jobmonitor, jobid)
             self.speeds = self.get_speeds(jobmonitor, jobid)
-            self.urls = self.get_urls(jobmonitor, jobid)
+            self.urls, self.scripts = self.get_urls_scripts(jobmonitor, jobid)
         else:
             self.locations = None
             self.speeds = None
-            self.urls = None
+            self.urls, self.scripts = None, None
         self.status = status
         self.started = started
         self.timestamp = timestamp
@@ -75,15 +78,16 @@ class Job(object):
         speeds = [speedrow[0] for speedrow in speedrows]
         return speeds
 
-    def get_urls(self, jobmonitor, jobid):
+    def get_urls_scripts(self, jobmonitor, jobid):
         """Get the urls for the specified job.
         """
-        jobmonitor.cursor.execute("select url from urls where jobid=:jobid",
+        jobmonitor.cursor.execute("select url, script from urls where jobid=:jobid",
                                   {"jobid": jobid})
         urlrows = jobmonitor.cursor.fetchall()
         # convert to an array of urls rather than an array of tuples of urls
         urls = [urlrow[0] for urlrow in urlrows]
-        return urls
+        scripts = [urlrow[1] for urlrow in urlrows]
+        return urls, scripts
 
 class JobMonitor(Daemon):
     def __init__(self, options, createdb=False):
@@ -92,6 +96,7 @@ class JobMonitor(Daemon):
 
         self.database = options.database
         self.job = None
+        self.scriptdir = options.scriptdir
 
         config = ConfigParser.RawConfigParser()
         config.readfp(open(options.settings))
@@ -191,13 +196,14 @@ class JobMonitor(Daemon):
             automatic_job["label"] = config.get(job_name, "label")
             automatic_job["build"] = config.get(job_name, "build")
             automatic_job["urls"] = config.get(job_name, "urls").split(",")
+            automatic_job["prescript"] = config.get(job_name, "prescript")
+            automatic_job["scripts"] = config.get(job_name, "scripts").split(",")
             automatic_job["locations"] = config.get(job_name, "locations").split(",")
             automatic_job["speeds"] = config.get(job_name, "speeds").split(",")
             automatic_job["runs"] = config.get(job_name, "runs")
             automatic_job["tcpdump"] = config.get(job_name, "tcpdump")
             automatic_job["video"] = config.get(job_name, "video")
             automatic_job["datazilla"] = config.get(job_name, "datazilla")
-            automatic_job["script"] = config.get(job_name, "script")
             automatic_job["hour"] = config.getint(job_name, "hour")
             # If the current hour before the scheduled hour for
             # the job, force its submission today. Otherwise, wait until
@@ -235,7 +241,8 @@ class JobMonitor(Daemon):
                                     "tcpdump text, "
                                     "video text, "
                                     "datazilla text, "
-                                    "script text, "
+                                    "prescript text, "
+                                    "postscript text, "
                                     "status text, "
                                     "started text, "
                                     "timestamp text"
@@ -259,6 +266,7 @@ class JobMonitor(Daemon):
                 self.cursor.execute("create table urls ("
                                     "id integer primary key autoincrement, "
                                     "url text, "
+                                    "script text, "
                                     "jobid references jobs(id)"
                                     ")"
                                     )
@@ -270,10 +278,12 @@ class JobMonitor(Daemon):
                 exit(2)
 
     def set_job(self, jobid, email, build, label, runs, tcpdump,
-                 video, datazilla, script, status, started, timestamp):
+                video, datazilla, prescript, postscript, status, started,
+                timestamp):
         try:
             self.job = Job(self, jobid, email, build, label, runs, tcpdump,
-                           video, datazilla, script, status, started, timestamp)
+                           video, datazilla, prescript, postscript, status,
+                           started, timestamp)
         except:
             self.notify_admin_exception("Error setting job")
             self.notify_user_exception(self.job.email,
@@ -281,13 +291,14 @@ class JobMonitor(Daemon):
             self.purge_job(jobid)
 
     def create_job(self, email, build, label, runs, tcpdump,
-                   video, datazilla, script,
-                   locations, speeds, urls):
+                   video, datazilla, prescript, postscript,
+                   locations, speeds, urls, scripts):
         self.set_job(None, email, build, label, runs, tcpdump, video, datazilla,
-                     script, None, None, None)
+                     prescript, postscript, None, None, None)
         self.job.locations = locations
         self.job.speeds = speeds
         self.job.urls = urls
+        self.job.scripts = scripts
 
         # If the build is a simple hexadecimal string, convert it into
         # a url for the equivalent try build for the given email.
@@ -300,14 +311,14 @@ class JobMonitor(Daemon):
         try:
             self.cursor.execute(
                 "insert into jobs(email, build, label, runs, tcpdump, video, "
-                "datazilla, script, status, started) "
-                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (email, build, label, runs, tcpdump, video, datazilla, script,
-                 "waiting",
+                "datazilla, prescript, postscript, status, started) "
+                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (email, build, label, runs, tcpdump, video,
+                 datazilla, prescript, postscript, "waiting",
                  datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
             self.connection.commit()
             self.job.id = jobid = self.cursor.lastrowid
-        except sqlite3.OperationalError:
+        except:
             self.notify_admin_exception("Error inserting job")
             self.notify_user_exception(email, "Error inserting job")
             raise
@@ -319,7 +330,7 @@ class JobMonitor(Daemon):
                     "values (?, ?)",
                     (location, jobid))
                 self.connection.commit()
-            except sqlite3.OperationalError:
+            except:
                 self.notify_admin_exception("Error inserting location")
                 self.notify_user_exception(email, "Error inserting location")
                 self.purge_job(jobid)
@@ -331,7 +342,7 @@ class JobMonitor(Daemon):
                     "insert into speeds(speed, jobid) values (?, ?)",
                     (speed, jobid))
                 self.connection.commit()
-            except sqlite3.OperationalError:
+            except:
                 msg = ("SQLError inserting speed: email: %s, build: %s, "
                        "label: %s, location: %s" % (email, build, label, speed))
                 self.notify_admin_exception("Error inserting speed")
@@ -339,13 +350,24 @@ class JobMonitor(Daemon):
                 self.purge_job(jobid)
                 raise
 
-        for url in urls:
+        for iurl in range(len(urls)):
+            url = urls[iurl]
+            script = scripts[iurl] if scripts else ''
+            if script:
+                self.job.scripts[iurl] = script
+                try:
+                    script = open(os.path.join(self.scriptdir, script)).read()
+                except:
+                    self.notify_admin_exception("Error reading script for url %s" % url)
+                    self.notify_user_exception(email, "Error reading script for url %s" % url)
+                    self.purge_job(jobid)
+                    raise
             try:
                 self.cursor.execute(
-                    "insert into urls(url, jobid) values (?, ?)",
-                    (url, jobid))
+                    "insert into urls(url, script, jobid) values (?, ?, ?)",
+                    (url, script, jobid))
                 self.connection.commit()
-            except sqlite3.OperationalError:
+            except:
                 self.notify_admin_exception("Error inserting url")
                 self.notify_user_exception(email, "Error inserting url")
                 self.purge_job(jobid)
@@ -360,18 +382,20 @@ class JobMonitor(Daemon):
             job_message = ""
         else:
             job_message = """
-Job:       %(id)s
-Label:     %(label)s
-Build:     %(build)s
-Locations: %(locations)s
-Urls:      %(urls)s
-Speeds:    %(speeds)s
-Runs:      %(runs)s
-tcpdump:   %(tcpdump)s
-video:     %(video)s
-datazilla: %(datazilla)s
-script:    %(script)s
-Status:    %(status)s
+Job:        %(id)s
+Label:      %(label)s
+Build:      %(build)s
+Locations:  %(locations)s
+Urls:       %(urls)s
+Scripts:    %(scripts)s
+Speeds:     %(speeds)s
+Runs:       %(runs)s
+tcpdump:    %(tcpdump)s
+video:      %(video)s
+datazilla:  %(datazilla)s
+prescript:  %(prescript)s
+postscript: %(postscript)s
+Status:     %(status)s
 """ % self.job.__dict__
         job_message = "%s\n\n%s\n\n%s\n\n" % (subject, job_message, message)
         return job_message
@@ -506,17 +530,20 @@ Status:    %(status)s
         if not jobrow:
             return
 
-        (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+        (jobid, email, build, label, runs, tcpdump, video, datazilla,
+         prescript, postscript,
          status, started, timestamp) = jobrow
         self.set_job(jobid, email, build, label, runs, tcpdump, video, datazilla,
-                     script, status, started, timestamp)
+                     prescript, postscript, status, started, timestamp)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         self.job.status = status = "running"
         self.logger.debug("jobid: %s, email: %s, build: %s, label: %s, "
                           "runs; %s, tcpdump: %s, video: %s, datazilla: %s, "
-                          "script: %s, status: %s, started: %s, timestamp: %s" %
+                          "prescript: %s, postscript: %s, status: %s, "
+                          "started: %s, timestamp: %s" %
                           (jobid, email, build, label,
-                           runs, tcpdump, video, datazilla, script, status,
+                           runs, tcpdump, video, datazilla, prescript,
+                           postscript, status,
                            started, timestamp))
         try:
             self.cursor.execute(
@@ -651,24 +678,42 @@ Status:    %(status)s
                 "video": self.job.video,
                 "location": "%s.%s" % (location, speed),
                 "mv": 0,
-                "script": self.job.script,
+                "script": '',
                 "k": self.api_key,
             }
 
             self.logger.debug(
                 "submitting batch: email: %s, build: %s, "
                 "label: %s, location: %s, speed: %s, urls: %s, "
+                "prescript: %s, postscript: %s, scripts: %s, "
                 "wpt_parameters: %s, server: %s"  % (
                     self.job.email, self.job.build,
                     self.job.label, location, speed, self.job.urls,
+                    self.job.prescript, self.job.postscript,
+                    self.job.scripts,
                     wpt_parameters, self.server))
             partial_test_url_map = {}
-            for url in self.job.urls:
-                if self.job.script:
-                    wpt_parameters['script'] = '%s\nnavigate\t%s\n' % (self.job.script, url)
-
-                else:
+            for iurl in range(len(self.job.urls)):
+                url = self.job.urls[iurl]
+                script = self.job.scripts[iurl] if self.job.scripts else ''
+                if (not script and not self.job.prescript and
+                    not self.job.postscript):
                     wpt_parameters['url'] = url
+                else:
+                    # self.job.prescript is global and executed prior to
+                    # navigating to the site. self.job.postscript is global
+                    # and is executed after navigating to the site, but before
+                    # any per url script. Afterwards, we navigate
+                    # to the url and then, if it exists, execute the
+                    # per url script.
+                    if self.job.prescript:
+                        wpt_parameters['script'] += '%s\n' % self.job.prescript
+                    wpt_parameters['script'] += '\nnavigate\t%s\n' % url
+                    if self.job.postscript:
+                        wpt_parameters['script'] += '\n%s\n' % self.job.postscript
+                    if script:
+                        wpt_parameters['script'] += '\n%s\n' % script
+
                 request_url = 'http://%s/runtest.php?%s' % (self.server,
                                                             urllib.urlencode(wpt_parameters))
                 response = urllib.urlopen(request_url)
@@ -830,7 +875,6 @@ Status:    %(status)s
                         msg_body_map[msg_body_key] += msg
                         self.notify_admin_exception(msg)
                 if self.admin_loglevel == logging.DEBUG:
-                    import os.path
                     logdir = os.path.dirname(self.logfile)
                     result_txt = open(os.path.join(logdir, "results-%s.txt" % test_id), "a+")
                     result_txt.write(msg_body)
@@ -1024,17 +1068,21 @@ Status:    %(status)s
             raise
 
         for jobrow in jobrows:
-            (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+            (jobid, email, build, label, runs, tcpdump, video, datazilla,
+             prescript, postscript,
              status, started, timestamp) = jobrow
             self.set_job(jobid, email, build, label, runs, tcpdump,
-                         video, datazilla, script, status, started, timestamp)
+                         video, datazilla, prescript, postscript,
+                         status, started, timestamp)
 
             self.logger.debug("checking_waiting_jobs: "
                               "jobid: %s, email: %s, build: %s, label: %s, "
                               "runs: %s, tcpdump: %s, video: %s, datazilla: %s, "
-                              "script: %s, status: %s, started: %s, timestamp: %s" %
+                              "prescript: %s, postscript: %s, status: %s, "
+                              "started: %s, timestamp: %s" %
                               (jobid, email, build, label,
-                               runs, tcpdump, video, datazilla, script, status,
+                               runs, tcpdump, video, datazilla,
+                               prescript, postscript, status,
                                started, timestamp))
             try:
                 buildurl = self.check_build(build)
@@ -1081,9 +1129,10 @@ Status:    %(status)s
             for jobrow in jobrows:
                 # send email to user then delete job
                 (jobid, email, build, label, runs, tcpdump, video, datazilla,
-                 script, status, started, timestamp) = jobrow
+                 prescript, postscript, status, started, timestamp) = jobrow
                 self.set_job(jobid, email, build, label, runs, tcpdump,
-                             video, datazilla, script, status, started, timestamp)
+                             video, datazilla, prescript, postscript,
+                             status, started, timestamp)
                 self.purge_job(jobid)
 
     def check_automatic_jobs(self):
@@ -1103,10 +1152,12 @@ Status:    %(status)s
                                 aj["tcpdump"],
                                 aj["video"],
                                 aj["datazilla"],
-                                aj["script"],
+                                aj["prescript"],
+                                "",
                                 aj["locations"],
                                 aj["speeds"],
-                                aj["urls"])
+                                aj["urls"],
+                                aj["scripts"])
                 aj["datetime"] = now
 
 def main():
@@ -1135,7 +1186,14 @@ def main():
                       dest="settings",
                       default="settings.ini",
                       help="Path to configuration file. "
-                      "Defauls to settings.ini in current directory.")
+                      "Defaults to settings.ini in current directory.")
+
+    parser.add_option("--scriptdir",
+                      action="store",
+                      type="string",
+                      dest="scriptdir",
+                      help="Path to directory containing scripts. "
+                      "Defaults to same directory as settings.ini.")
 
     parser.add_option("--pidfile",
                       action="store",
@@ -1154,6 +1212,13 @@ def main():
     if not os.path.exists(options.settings):
         print "Settings file %s does not exist" % options.settings
         exit(2)
+
+    if not options.scriptdir:
+        options.scriptdir = os.path.dirname(options.settings)
+    else:
+        if not os.path.exists(options.scriptdir):
+            print "script directory %s does not exist" % options.scriptdir
+            exit(2)
 
     jm = JobMonitor(options)
 

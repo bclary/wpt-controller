@@ -30,7 +30,8 @@ def application(environ, start_response):
     tcpdump = ""
     video = ""
     datazilla = ""
-    script = ""
+    prescript = ""
+    postscript = ""
     locations = []
     speeds = []
     urls = []
@@ -73,7 +74,8 @@ def application(environ, start_response):
         video = d.get("video", [""])[0]
         datazilla = d.get("datazilla", [""])[0]
         url = d.get("url", [""])[0]
-        script = d.get("script", [""])[0]
+        prescript = d.get("prescript", [""])[0]
+        postscript = d.get("postscript", [""])[0]
         locations = d.get("locations", [])
         speeds = d.get("speeds", [])
         urls = d.get("urls", [])
@@ -89,7 +91,8 @@ def application(environ, start_response):
         tcpdump = escape(tcpdump.strip())
         video = escape(video.strip())
         datazilla = escape(datazilla.strip())
-        script = escape(script.strip())
+        prescript = escape(prescript.strip())
+        postscript = escape(postscript.strip())
         locations = [escape(location.strip()) for location in locations]
         speeds = [escape(speed.strip()) for speed in speeds]
         urls = [escape(url.strip()) for url in urls]
@@ -100,8 +103,8 @@ def application(environ, start_response):
 
         if email and build and runs and locations and speeds and urls:
             jm.create_job(email, build, label, runs, tcpdump,
-                          video, datazilla, script,
-                          locations, speeds, urls)
+                          video, datazilla, prescript, postscript,
+                          locations, speeds, urls, [])
 
         status = "302 Found"
         response_headers = [("Location", "/wpt-controller")]
@@ -124,7 +127,7 @@ def application(environ, start_response):
             "<th>cancel</th>" +
             "<th>job id</th><th>user email</th><th>build</th>" +
             "<th>label</th><th>runs</th><th>tcpdump</th>" +
-            "<th>video</th><th>datazilla</th><th>script</th><th>status</th><th>started</th>" +
+            "<th>video</th><th>datazilla</th><th>prescript</th><th>postscript</th><th>status</th><th>started</th>" +
             "<th>timestamp</th>" +
             "<th>location</th>" +
             "<th>speed</th>" +
@@ -132,10 +135,11 @@ def application(environ, start_response):
             "</tr>")
 
     for jobrow in jobrows:
-        (jobid, email, build, label, runs, tcpdump, video, datazilla, script,
+        (jobid, email, build, label, runs, tcpdump, video, datazilla,
+         prescript, postsript,
          status, started, timestamp) = jobrow
         jm.set_job(jobid, email, build, label, runs, tcpdump, video, datazilla,
-                   script, status, started, timestamp)
+                   prescript, postscript, status, started, timestamp)
         try:
             jm.cursor.execute(
                 "select * from locations where jobid=:jobid",
@@ -185,7 +189,7 @@ def application(environ, start_response):
                           if showcanceljob else "<td>&nbsp;<!-- %s --></td>") +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td><td>%s</td><td>%s</td>" +
-                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
+                         "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
                          "<td>%s</td>" +
@@ -232,6 +236,13 @@ if __name__ == "__main__":
                       default="settings.ini",
                       help="Path to configuration file. "
                       "Defaults to settings.ini in current directory.")
+
+    parser.add_option("--scriptdir",
+                      action="store",
+                      type="string",
+                      dest="scriptdir",
+                      help="Path to directory containing scripts. "
+                      "Defaults to same directory as settings.ini.")
 
     parser.add_option("--pidfile",
                       action="store",
@@ -327,13 +338,18 @@ if __name__ == "__main__":
     html += """
         </select>
         <p>
-          <label for="script">Script:</label>
+          See <a href="https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting">Scripting
+          WebPagetest</a> for more information about scripting WebPagetest.
+          Use \\t to embed a tab in the text input.
         </p>
         <p>
-          See <a href="https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting">Scripting
-          WebPagetest</a> for more information. Use \\t to embed a tab in the text input.
+          <label for="prescript">Pre Script:</label> Executed prior to page load. Use for preferences, etc.
         </p>
-        <textarea name="script" cols="80" rows="6"></textarea>
+        <textarea name="prescript" cols="80" rows="6"></textarea>
+        <p>
+          <label for="postscript">Post Script:</label> Executed after page load.
+        </p>
+        <textarea name="postscript" cols="80" rows="6"></textarea>
         %s
         <p>
           <input type="submit" value="Submit">

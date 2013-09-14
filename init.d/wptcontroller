@@ -30,7 +30,7 @@ PIDFILE=/var/run/wptcontroller/$NAME.pid
 LOGFILE=/var/log/wptcontroller/$NAME.log
 DBFILE=/var/log/wptcontroller/jobs.sqlite
 SCRIPTNAME=/etc/init.d/$NAME
-DAEMON_ARGS="--daemonize --pidfile $PIDFILE --settings $SETTINGSFILE --database $DBFILE --log $LOGFILE"
+DAEMON_ARGS="--daemonize --pidfile $PIDFILE --settings $SETTINGSFILE --scriptdir $DAEMON_DIR --database $DBFILE --log $LOGFILE"
 
 # Exit if the package is not installed
 [ -x "$DAEMON" ] || exit 0

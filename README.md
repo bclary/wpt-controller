@@ -404,6 +404,11 @@ sections in the ini file which describe the job to be submitted.
 * label - label to be used for the job.
 * build - url for the build or build directory where the build can be downloaded.
 * urls - comma delimited list of urls to be tested in the job.
+* prescript - string containing a WebPagetest script to be executed prior to the url loads.
+prescript can be used to set preferences prior to starting a test. prescript will be used for
+every url in the urls list.
+* scripts - comma delimited list of file names containing scripts to be executed after url loads.
+Each script file corresponds to the url in the same position in the urls list.
 * locations - comma delimited list of locations to be tested in the job. Note these locations
 consist of the <machine-name>:<browser>, e.g. bc-win61i32-bldw:Firefox.
 * speeds - comma delimited list of speeds to be tested.
@@ -411,7 +416,6 @@ consist of the <machine-name>:<browser>, e.g. bc-win61i32-bldw:Firefox.
 * tcpdump - on to collect a tcpdump of the test.
 * video - on to collect a video of the test.
 * datazilla - on to submit the results to datazilla.
-* script - string containing a WebPagetest script.
 * hour - hour of the day to submit the job.
 
 ##### defaults
