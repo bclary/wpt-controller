@@ -352,7 +352,7 @@ class JobMonitor(Daemon):
 
         for iurl in range(len(urls)):
             url = urls[iurl]
-            script = scripts[iurl] if scripts else ''
+            script = scripts[iurl] if scripts and iurl < len(scripts) else ''
             if script:
                 self.job.scripts[iurl] = script
                 try:
