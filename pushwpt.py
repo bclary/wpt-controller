@@ -110,14 +110,23 @@ class WptOptions(optparse.OptionParser):
                         help="Label of the machine to test, default: user-test")
         defaults["label"] = "user-test"
 
-        self.add_option("--script",
-                        action="store", dest="script",
-                        help="WebPagetest script to execute, default: None. "
+        self.add_option("--prescript",
+                        action="store", dest="prescript",
+                        help="WebPagetest script to execute prior to page naviation, default: None. "
                         "Use \\t to embed tabs and \\n to embed newlines "
                         "in the script. "
                         "See https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting "
                         "for more information on scripting WebPagetest.")
-        defaults["script"] = ""
+        defaults["prescript"] = ""
+
+        self.add_option("--postscript",
+                        action="store", dest="postscript",
+                        help="WebPagetest script to execute after to page naviation, default: None. "
+                        "Use \\t to embed tabs and \\n to embed newlines "
+                        "in the script. "
+                        "See https://sites.google.com/a/webpagetest.org/docs/using-webpagetest/scripting "
+                        "for more information on scripting WebPagetest.")
+        defaults["postscript"] = ""
 
         self.set_defaults(**defaults)
         usage = """
@@ -223,7 +232,8 @@ def postToWPTQueue(options):
                 'email': [options.username],
                 'build': [options.build],
                 'label': [options.label],
-                'script': [options.script],
+                'prescript': [options.prescript],
+                'postscript': [options.postscript],
                 'runs': options.runs,
                 'tcpdump': [''] if options.no_tcpdump else ['on'],
                 'video': [''] if options.no_video else ['on'],
