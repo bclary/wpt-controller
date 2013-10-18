@@ -825,7 +825,13 @@ Status:     %(status)s
             msg_body_list = [
                 "Url: %s" % url,
                 "Speed: %s" % speed,
-                "Result: http://%s/result/%s/\n" % (self.results_server, test_id)]
+                "Result: http://%s/result/%s/" % (self.results_server,
+                                                  test_id),
+                "JSON Result: http://%s/jsonResult/%s/" % (self.results_server,
+                                                           test_id),
+                "XML Result: http://%s/xmlResult/%s/\n" % (self.results_server,
+                                                           test_id)
+            ]
             for irun in range(1, runs+1):
                 msg_body_list.append("    Run: %d" % irun)
                 msg_body_list.append("        firstView")
@@ -840,8 +846,8 @@ Status:     %(status)s
                                      (self.results_server, test_id, irun))
             msg_body_list.append("%s" % msg)
             msg_body_map[msg_body_key] = "\n".join(msg_body_list)
-            result_url = "http://%s/jsonResult.php?test=%s" % (self.server,
-                                                               test_id)
+            result_url = "http://%s/jsonResult/%s/" % (self.server,
+                                                       test_id)
             self.logger.debug("Getting result for test %s result_url %s" %
                               (test_id, result_url))
             result_response = urllib.urlopen(result_url)
@@ -944,13 +950,17 @@ Status:     %(status)s
             wpt_data[view]['load_geometric_mean'] = []
             wpt_data[view]['load_quadratic_mean'] = []
 
-        if len(runs) == 1:
+        # webpagetest changed runs from an array to a dict with keys
+        # corresponding to the string value of the index. In addition,
+        # it dropped the dummy run at index 0.
+        if len(runs) == 0:
             raise Exception("post_to_datazilla: no runs")
         os_version = "unknown"
         os_name = "unknown"
         platform = "x86"
         reUserAgent = re.compile('User-Agent: Mozilla/5.0 \(Windows NT ([^;]*);.*')
-        for run in runs:
+        for irun in range(1, len(runs)+1, 1):
+            run = runs[str(irun)]
             for view in "firstView", "repeatView":
                 if not run[view]:
                     continue
