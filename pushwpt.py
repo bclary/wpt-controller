@@ -234,7 +234,7 @@ def postToWPTQueue(options):
                 'label': [options.label],
                 'prescript': [options.prescript],
                 'postscript': [options.postscript],
-                'runs': options.runs,
+                'runs': [options.runs],
                 'tcpdump': [''] if options.no_tcpdump else ['on'],
                 'video': [''] if options.no_video else ['on'],
                 'datazilla': ['on'] if options.datazilla else [''],
