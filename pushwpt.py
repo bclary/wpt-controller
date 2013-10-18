@@ -137,8 +137,8 @@ class WptOptions(optparse.OptionParser):
 
     def verifyOptions(self, options):
         if options.build:
-            if options.revision or options.username:
-                print "ERROR: if you are specifying a specific build, you cannot specify a revision and username"
+            if options.revision:
+                print "ERROR: if you are specifying a specific build, you cannot specify a revision."
                 sys.exit(1)
 
             # http://people.mozilla.org/~jmaher/firefox-24.win32.exe
@@ -148,7 +148,7 @@ class WptOptions(optparse.OptionParser):
                 sys.exit(1)
 
             # verify build exists
-            server = 'http://people.mozilla.org'
+            server = 'people.mozilla.org'
             path = options.build.split(server)[-1]
             conn = httplib.HTTPConnection(server)
             conn.request('HEAD', path)
