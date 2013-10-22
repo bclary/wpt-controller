@@ -163,16 +163,26 @@ so that it looks like
 
 The most recent release of WebPagetest at this time is <a
 href="https://github.com/WPO-Foundation/webpagetest/releases/tag/WebPagetest-2.12">WebPageTest-
-2.12</a>.  Download and unpack the distribution, move the www subdirectory
+2.12</a>.  However the current version of wpt-controller relies up changes which have been
+made to the json results format since WebPagetest 2.12 was released.
+<del>Download and unpack the distribution</del>, <ins>Clone the repository</ins>, then
+move the www subdirectory
 to <code>/var/www/webpagetest</code> and change the owner to the
 Apache www-data user.
 
 <pre>
+<del>
 mkdir -p ~/Downloads/webpagetest.org
 cd ~/Downloads/webpagetest.org
 curl -O https://github.com/WPO-Foundation/webpagetest/releases/download/WebPagetest-2.12/webpagetest_2.12.zip
 unzip webpagetest_2.12.zip
-sudo mv www /var/www/webpagetest
+sudo mv webpagetest_2.12/www /var/www/webpagetest
+</del>
+<ins>
+cd ~/Downloads/
+git clone https://github.com/WPO-Foundation/webpagetest.git
+sudo cp -a webpagetest/www /var/www/webpagetest
+</ins>
 sudo chown -R www-data:www-data /var/www/webpagetest
 cd /var/www/webpagetest
 sudo chmod -R ug+w tmp results work/jobs work/video logs
@@ -323,6 +333,17 @@ label="bc-win61i32-bldw"
 key=XXXXXX
 </pre>
 
+##### .htaccess
+
+Edit /var/www/webpagetest/.htaccess and add the following rewrite rule:
+
+<pre>
+RewriteRule ^jsonResult/([a-zA-Z0-9_]+)/$ /jsonResult.php?test=$1 [qsa]
+</pre>
+
+You can copy and edit the line for xmlResult.
+
+
 #### Configuring Webpagetest to support wpt-controller
 
 In addition to the other directories listed in setting up Private Instances,
@@ -353,6 +374,14 @@ sudo git clone https://github.com/bclary/wpt-controller
 sudo chown www-data:www-data wpt-controller
 </pre>
 
+#### Install 7z
+
+<code>wptmonitor.py</code> uses 7z to unpack Firefox installers.
+
+<pre>
+sudo apt-get install p7zip-full
+</pre>
+
 #### Install BeautifulSoup
 
 <code>wptmonitor.py</code> uses BeautifulSoup to scrape urls for build urls.
@@ -360,6 +389,14 @@ sudo chown www-data:www-data wpt-controller
 <pre>
 sudo apt-get install python-pip
 sudo pip install BeautifulSoup
+</pre>
+
+#### Install Datazilla
+
+<code>wptmonitor.py</code> uses Datazilla's dzclient to submit results to datazilla.mozilla.org.
+
+<pre>
+sudo pip install datazilla
 </pre>
 
 #### wpt-controller Configuration
