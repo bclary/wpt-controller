@@ -8,11 +8,12 @@
 
 # from autophone's jobs.py
 import ConfigParser
-import logging
-import sqlite3
-import os
-import json
 import datetime
+import json
+import logging
+import os
+import sqlite3
+import urlparse
 
 from wsgiref.simple_server import make_server
 from cgi import parse_qs, escape
@@ -68,6 +69,12 @@ def application(environ, start_response):
 
         email = d.get("email", [""])[0]
         build = d.get("build", [""])[0]
+        # bc: Force the build url to be over https to work around proxy errors
+        # with http. See wptmonitor.get_proxy_info.
+        build_parts = [build_part for build_part in urlparse.urlparse(build)]
+        if build_parts[0].lower() == 'http':
+            build_parts[0] = 'https'
+            build = urlparse.urlunparse(build_parts)
         label = d.get("label", [""])[0]
         runs = d.get("runs", [""])[0]
         tcpdump = d.get("tcpdump", [""])[0]

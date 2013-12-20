@@ -29,6 +29,27 @@ from logging.handlers import TimedRotatingFileHandler
 from emailhandler import SMTPHandler
 from daemonize import Daemon
 
+def get_proxy_info(scheme):
+    """ Work around http://code.google.com/p/httplib2/issues/detail?id=228
+    Squid proxies are typically configured to prevent socket connect on http
+    ports. get_proxy_info forces the proxy to use socks.PROXY_TYPE_HTTP_NO_TUNNEL
+    for http to work around the issue.
+    bc: The current squid proxy will still fail with a status 400 Invalid Request
+    'x-squid-error': 'ERR_INVALID_URL 0.
+    """
+    if hasattr(httplib2, 'proxy_info_from_environment'):
+        # httplib2 0.8
+        proxy_info = httplib2.proxy_info_from_environment()
+    elif hasattr(httplib2.ProxyInfo, 'from_environment'):
+        # httplib2 0.7.x
+        proxy_info = httplib2.ProxyInfo.from_environment()
+    else:
+        proxy_info = None
+    if (proxy_info and scheme == 'http' and
+        hasattr(httplib2.socks, 'PROXY_TYPE_HTTP_NO_TUNNEL')):
+        proxy_info.proxy_type = httplib2.socks.PROXY_TYPE_HTTP_NO_TUNNEL
+    return proxy_info
+
 class Job(object):
     def __init__(self, jobmonitor, jobid, email, build, label, runs, tcpdump,
                  video, datazilla, prescript, postscript, status, started,
@@ -490,7 +511,8 @@ Status:     %(status)s
 
         buildurl = None
         re_builds = re.compile(r"firefox-([0-9]+).*\.win32\.installer\.exe")
-        httplib = httplib2.Http();
+
+        httplib = httplib2.Http(proxy_info = get_proxy_info);
 
         if not build.endswith("/"):
             # direct url to a build implies the build is available now.
@@ -614,7 +636,13 @@ Status:     %(status)s
         returncode = subprocess.call(["7z", "x", self.firefoxpath,
                                       "-o%s" % tempdirectory])
         appini = ConfigParser.RawConfigParser()
-        appini.readfp(open("%s/core/application.ini" % tempdirectory))
+        try:
+            appini.readfp(open("%s/core/application.ini" % tempdirectory))
+        except IOError:
+            self.notify_admin_exception("Error reading application.ini")
+            self.notify_user_exception(self.job.email,
+                                       "job failed")
+            return False
         self.build_name = appini.get("App", "name")
         self.build_version = appini.get("App", "version")
         self.build_id = appini.get("App", "buildID")
